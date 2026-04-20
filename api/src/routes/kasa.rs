@@ -17,8 +17,8 @@ pub struct Kasa {
     pub bakiye: f64,
     pub aciklama: Option<String>,
     pub aktif: bool,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,7 +45,7 @@ pub struct KasaHareketi {
     pub giren: f64,
     pub cikan: f64,
     pub bakiye: f64,
-    pub created_at: chrono::NaiveDateTime,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Deserialize)]

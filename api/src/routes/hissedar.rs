@@ -20,8 +20,8 @@ pub struct Hissedar {
     pub yakin_adi: Option<String>,
     pub yakinlik_derecesi: Option<String>,
     pub aktif: bool,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Deserialize)]

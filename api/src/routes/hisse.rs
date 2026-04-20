@@ -15,8 +15,8 @@ pub struct Hisse {
     pub aciklama: Option<String>,
     pub hissedar_id: Option<i64>,
     pub hissedar_adi: Option<String>,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -28,7 +28,7 @@ pub struct HisseAtama {
     pub tarih: chrono::NaiveDate,
     pub ucret: f64,
     pub aciklama: Option<String>,
-    pub created_at: chrono::NaiveDateTime,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Deserialize)]

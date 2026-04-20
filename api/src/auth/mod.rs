@@ -1,4 +1,4 @@
-use axum::{
+﻿use axum::{
     extract::{FromRequestParts, State},
     http::{request::Parts, StatusCode},
     routing::post,
@@ -10,17 +10,17 @@ use sqlx::PgPool;
 use std::env;
 use crate::errors::{AppError, AppResult};
 
-// ─── JWT Claims ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ JWT Claims â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    pub sub: i64,          // kullanıcı id
+    pub sub: i64,          // kullanÄ±cÄ± id
     pub email: String,
     pub rol: String,
     pub exp: i64,          // unix timestamp
 }
 
-// ─── Kullanıcı Modeli ─────────────────────────────────────────────────────────
+// â”€â”€â”€ KullanÄ±cÄ± Modeli â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Kullanici {
@@ -29,10 +29,10 @@ pub struct Kullanici {
     pub email: String,
     pub rol: String,
     pub aktif: bool,
-    pub created_at: chrono::NaiveDateTime,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-// ─── Request/Response ─────────────────────────────────────────────────────────
+// â”€â”€â”€ Request/Response â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[derive(Debug, Deserialize)]
 pub struct LoginInput {
@@ -46,7 +46,7 @@ pub struct LoginResponse {
     pub kullanici: Kullanici,
 }
 
-// ─── Router ───────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Router â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 pub fn router(pool: PgPool) -> Router {
     Router::new()
@@ -54,7 +54,7 @@ pub fn router(pool: PgPool) -> Router {
         .with_state(pool)
 }
 
-// ─── JWT yardımcıları ─────────────────────────────────────────────────────────
+// â”€â”€â”€ JWT yardÄ±mcÄ±larÄ± â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 pub fn jwt_secret() -> String {
     env::var("JWT_SECRET").unwrap_or_else(|_| "koop-gizli-anahtar-degistir".to_string())
@@ -93,7 +93,7 @@ pub fn token_dogrula(token: &str) -> Result<Claims, AppError> {
     Ok(verisi.claims)
 }
 
-// ─── Axum extractor: Authorization header'dan Claims al ──────────────────────
+// â”€â”€â”€ Axum extractor: Authorization header'dan Claims al â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 pub struct AuthUser(pub Claims);
 
@@ -135,13 +135,13 @@ where
     }
 }
 
-// ─── Handler'lar ──────────────────────────────────────────────────────────────
+// â”€â”€â”€ Handler'lar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async fn login(
     State(pool): State<PgPool>,
     Json(input): Json<LoginInput>,
 ) -> AppResult<Json<LoginResponse>> {
-    // Kullanıcıyı e-posta ile bul
+    // KullanÄ±cÄ±yÄ± e-posta ile bul
     let kullanici = sqlx::query_as::<_, Kullanici>(
         "SELECT id, ad, email, rol, aktif, created_at
          FROM kullanicilar WHERE email = $1 AND aktif = true"
@@ -149,9 +149,9 @@ async fn login(
     .bind(&input.email)
     .fetch_optional(&pool)
     .await?
-    .ok_or_else(|| AppError::BadRequest("E-posta veya şifre hatalı".to_string()))?;
+    .ok_or_else(|| AppError::BadRequest("E-posta veya ÅŸifre hatalÄ±".to_string()))?;
 
-    // Şifre hash'ini ayrı al
+    // Åifre hash'ini ayrÄ± al
     let sifre_hash: String = sqlx::query_scalar(
         "SELECT sifre_hash FROM kullanicilar WHERE id = $1"
     )
@@ -163,10 +163,10 @@ async fn login(
         .map_err(|e| AppError::Internal(e.into()))?;
 
     if !dogru {
-        return Err(AppError::BadRequest("E-posta veya şifre hatalı".to_string()));
+        return Err(AppError::BadRequest("E-posta veya ÅŸifre hatalÄ±".to_string()));
     }
 
-    // JWT üret
+    // JWT Ã¼ret
     let token = token_olustur(kullanici.id, &kullanici.email, &kullanici.rol)
         .map_err(AppError::Internal)?;
 

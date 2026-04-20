@@ -14,8 +14,8 @@ pub struct Donem {
     pub yil: i32,
     pub hisse_basi_aidat: f64,
     pub aktif: bool,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Deserialize)]

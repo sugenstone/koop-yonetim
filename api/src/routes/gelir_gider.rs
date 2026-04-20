@@ -14,8 +14,8 @@ pub struct GelirGiderKategori {
     pub tip: String,
     pub aciklama: Option<String>,
     pub aktif: bool,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -28,7 +28,7 @@ pub struct GelirGiderKayit {
     pub tutar: f64,
     pub aciklama: String,
     pub kasa_hareketi_id: Option<i64>,
-    pub created_at: chrono::NaiveDateTime,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Deserialize)]
