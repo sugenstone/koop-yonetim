@@ -31,6 +31,8 @@
     type ParaBirimi
   } from '$lib/tauri-api';
   import { exportPdf } from '$lib/pdf';
+  import Can from '$lib/Can.svelte';
+  import { notify } from '$lib/toast';
 
   // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -111,9 +113,11 @@
         await kasaApi.create(input);
       }
       modalAcik = false;
+      notify.success(duzenleKasa ? 'Kasa guncellendi' : 'Kasa olusturuldu');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Kayıt hatası';
+      notify.apiError(e, 'Kayit hatasi');
+      hata = e?.message ?? 'Kayit hatasi';
     } finally {
       kaydediliyor = false;
     }
@@ -126,9 +130,11 @@
       await kasaApi.delete(silinecekKasa.id);
       silModalAcik = false;
       silinecekKasa = null;
+      notify.success('Kasa silindi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Silme hatası';
+      notify.apiError(e, 'Silme hatasi');
+      hata = e?.message ?? 'Silme hatasi';
     } finally {
       kaydediliyor = false;
     }
@@ -181,10 +187,12 @@
         <FileLinesSolid class="h-4 w-4" />
         PDF
       </Button>
-      <Button onclick={yeniKasaAc} class="gap-2">
-        <PlusOutline class="h-4 w-4" />
-        Yeni Kasa
-      </Button>
+      <Can permission="kasa.olustur">
+        <Button onclick={yeniKasaAc} class="gap-2">
+          <PlusOutline class="h-4 w-4" />
+          Yeni Kasa
+        </Button>
+      </Can>
     </div>
   </div>
 
@@ -206,9 +214,11 @@
     <div class="flex h-64 flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-700">
       <WalletSolid class="mb-3 h-12 w-12 text-gray-400" />
       <p class="text-gray-500 dark:text-gray-400">Henüz kasa eklenmemiş</p>
-      <Button size="sm" class="mt-4 gap-2" onclick={yeniKasaAc}>
-        <PlusOutline class="h-4 w-4" /> Kasa Ekle
-      </Button>
+      <Can permission="kasa.olustur">
+        <Button size="sm" class="mt-4 gap-2" onclick={yeniKasaAc}>
+          <PlusOutline class="h-4 w-4" /> Kasa Ekle
+        </Button>
+      </Can>
     </div>
 
   <!-- Kasa Kartları -->
@@ -250,20 +260,24 @@
           <!-- Aksiyonlar -->
           <div class="mt-4 flex items-center justify-between">
             <div class="flex gap-2">
-              <button
-                class="rounded p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-gray-700"
-                onclick={() => duzenleAc(kasa)}
-                title="Düzenle"
-              >
-                <EditOutline class="h-4 w-4" />
-              </button>
-              <button
-                class="rounded p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-gray-700"
-                onclick={() => silAc(kasa)}
-                title="Sil"
-              >
-                <TrashBinSolid class="h-4 w-4" />
-              </button>
+              <Can permission="kasa.duzenle">
+                <button
+                  class="rounded p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-gray-700"
+                  onclick={() => duzenleAc(kasa)}
+                  title="Düzenle"
+                >
+                  <EditOutline class="h-4 w-4" />
+                </button>
+              </Can>
+              <Can permission="kasa.sil">
+                <button
+                  class="rounded p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-gray-700"
+                  onclick={() => silAc(kasa)}
+                  title="Sil"
+                >
+                  <TrashBinSolid class="h-4 w-4" />
+                </button>
+              </Can>
             </div>
             <button
               class="flex items-center gap-1 text-sm text-primary-600 hover:underline dark:text-primary-400"

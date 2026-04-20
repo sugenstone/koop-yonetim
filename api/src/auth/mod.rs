@@ -46,11 +46,24 @@ pub struct LoginResponse {
     pub kullanici: Kullanici,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RegisterInput {
+    pub ad: String,
+    pub email: String,
+    pub sifre: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RegisterResponse {
+    pub mesaj: String,
+}
+
 // â”€â”€â”€ Router â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 pub fn router(pool: PgPool) -> Router {
     Router::new()
         .route("/giris", post(login))
+        .route("/kayit", post(register))
         .with_state(pool)
 }
 
@@ -111,6 +124,31 @@ impl AuthUser {
             )))
         }
     }
+
+    /// İzin tabanlı kontrol: rol_izinleri tablosundan okur.
+    /// Admin rolü her zaman izinlidir (güvenlik backstop).
+    pub async fn require_izin(&self, pool: &sqlx::PgPool, anahtar: &str) -> AppResult<()> {
+        if self.0.rol == "admin" {
+            return Ok(());
+        }
+        let var: Option<i32> = sqlx::query_scalar(
+            "SELECT 1 FROM rol_izinleri ri
+             JOIN izinler i ON i.id = ri.izin_id
+             WHERE ri.rol = $1 AND i.anahtar = $2
+             LIMIT 1",
+        )
+        .bind(&self.0.rol)
+        .bind(anahtar)
+        .fetch_optional(pool)
+        .await?;
+        if var.is_some() {
+            Ok(())
+        } else {
+            Err(AppError::Forbidden(format!(
+                "'{}' izni gerekli (rol: {})", anahtar, self.0.rol
+            )))
+        }
+    }
 }
 
 impl<S> FromRequestParts<S> for AuthUser
@@ -141,35 +179,113 @@ async fn login(
     State(pool): State<PgPool>,
     Json(input): Json<LoginInput>,
 ) -> AppResult<Json<LoginResponse>> {
-    // KullanÄ±cÄ±yÄ± e-posta ile bul
-    let kullanici = sqlx::query_as::<_, Kullanici>(
-        "SELECT id, ad, email, rol, aktif, created_at
-         FROM kullanicilar WHERE email = $1 AND aktif = true"
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        id: i64,
+        ad: String,
+        email: String,
+        rol: String,
+        aktif: bool,
+        created_at: chrono::DateTime<chrono::Utc>,
+        onay_durumu: String,
+        sifre_hash: String,
+    }
+
+    let row: Option<Row> = sqlx::query_as::<_, Row>(
+        "SELECT id, ad, email, rol, aktif, created_at, onay_durumu, sifre_hash
+         FROM kullanicilar WHERE email = $1"
     )
     .bind(&input.email)
     .fetch_optional(&pool)
-    .await?
-    .ok_or_else(|| AppError::BadRequest("E-posta veya ÅŸifre hatalÄ±".to_string()))?;
-
-    // Åifre hash'ini ayrÄ± al
-    let sifre_hash: String = sqlx::query_scalar(
-        "SELECT sifre_hash FROM kullanicilar WHERE id = $1"
-    )
-    .bind(kullanici.id)
-    .fetch_one(&pool)
     .await?;
 
-    let dogru = bcrypt::verify(&input.sifre, &sifre_hash)
+    let r = row.ok_or_else(|| AppError::BadRequest("E-posta veya sifre hatali".into()))?;
+
+    if r.onay_durumu == "beklemede" {
+        return Err(AppError::Forbidden(
+            "Hesabiniz yonetici onayi bekliyor.".into()
+        ));
+    }
+    if r.onay_durumu == "reddedilmis" {
+        return Err(AppError::Forbidden("Kayit basvurunuz reddedildi.".into()));
+    }
+    if !r.aktif {
+        return Err(AppError::Forbidden("Hesabiniz pasif durumda.".into()));
+    }
+
+    let dogru = bcrypt::verify(&input.sifre, &r.sifre_hash)
         .map_err(|e| AppError::Internal(e.into()))?;
 
     if !dogru {
-        return Err(AppError::BadRequest("E-posta veya ÅŸifre hatalÄ±".to_string()));
+        return Err(AppError::BadRequest("E-posta veya sifre hatali".into()));
     }
 
-    // JWT Ã¼ret
-    let token = token_olustur(kullanici.id, &kullanici.email, &kullanici.rol)
+    let kullanici = Kullanici {
+        id: r.id, ad: r.ad, email: r.email.clone(),
+        rol: r.rol.clone(), aktif: r.aktif, created_at: r.created_at,
+    };
+
+    let token = token_olustur(r.id, &r.email, &r.rol)
         .map_err(AppError::Internal)?;
 
     Ok(Json(LoginResponse { token, kullanici }))
 }
 
+// --- Kayit (public) -----------------------------------------------------------
+
+async fn register(
+    State(pool): State<PgPool>,
+    Json(input): Json<RegisterInput>,
+) -> AppResult<Json<RegisterResponse>> {
+    if input.ad.trim().len() < 2 {
+        return Err(AppError::BadRequest("Ad en az 2 karakter olmali".into()));
+    }
+    if !input.email.contains('@') {
+        return Err(AppError::BadRequest("Gecerli bir e-posta girin".into()));
+    }
+    if input.sifre.len() < 6 {
+        return Err(AppError::BadRequest("Sifre en az 6 karakter olmali".into()));
+    }
+
+    let var: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM kullanicilar WHERE email = $1"
+    )
+    .bind(&input.email)
+    .fetch_optional(&pool)
+    .await?;
+
+    if var.is_some() {
+        return Err(AppError::BadRequest("Bu e-posta zaten kayitli".into()));
+    }
+
+    let hash = bcrypt::hash(&input.sifre, bcrypt::DEFAULT_COST)
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    sqlx::query(
+        "INSERT INTO kullanicilar (ad, email, sifre_hash, rol, aktif, onay_durumu)
+         VALUES ($1, $2, $3, 'izleyici', false, 'beklemede')"
+    )
+    .bind(&input.ad)
+    .bind(&input.email)
+    .bind(&hash)
+    .execute(&pool)
+    .await?;
+
+    let admin_to = crate::mail::admin_email();
+    let ad = input.ad.clone();
+    let email = input.email.clone();
+    tokio::spawn(async move {
+        let body = format!(
+            "<h3>Yeni kullanici kaydi</h3>\
+             <p><b>Ad:</b> {}</p>\
+             <p><b>E-posta:</b> {}</p>\
+             <p>Panelde onaylayin.</p>",
+            ad, email
+        );
+        crate::mail::send(&admin_to, "Yeni kullanici onay bekliyor", &body).await;
+    });
+
+    Ok(Json(RegisterResponse {
+        mesaj: "Kayit basvurunuz alindi. Yonetici onayindan sonra giris yapabilirsiniz.".into()
+    }))
+}

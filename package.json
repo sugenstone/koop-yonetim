@@ -91,6 +91,7 @@
     "@tauri-apps/plugin-sql": "^2.4.0",
     "flowbite-svelte": "^1.13.8",
     "flowbite-svelte-icons": "^3.0.0",
+    "svelte-sonner": "^1.1.0",
     "tailwind-merge": "^3.3.1"
   },
   "keywords": [

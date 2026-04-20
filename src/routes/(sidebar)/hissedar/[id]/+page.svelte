@@ -41,6 +41,8 @@
   import DataTable from '$lib/components/DataTable.svelte';
   import type { DataTableColumn } from '$lib/components/dataTableUtils';
   import { exportPdf, formatTL, formatTarih } from '$lib/pdf';
+  import Can from '$lib/Can.svelte';
+  import { notify } from '$lib/toast';
 
   // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -127,9 +129,11 @@
         aktif: fAktif
       });
       duzenleModalAcik = false;
+      notify.success('Hissedar guncellendi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Güncelleme hatası';
+      notify.apiError(e, 'Guncelleme hatasi');
+      hata = e?.message ?? 'Guncelleme hatasi';
     } finally {
       kaydediliyor = false;
     }
@@ -142,9 +146,11 @@
     kaydediliyor = true;
     try {
       await hissedarApi.delete(hissedar.id);
+      notify.success('Hissedar silindi');
       goto('/hissedar');
     } catch (e: any) {
-      hata = e?.toString() ?? 'Silme hatası';
+      notify.apiError(e, 'Silme hatasi');
+      hata = e?.message ?? 'Silme hatasi';
       kaydediliyor = false;
     }
   }
@@ -192,9 +198,11 @@
         tutar,
         aciklama: fParaAciklama.trim() || undefined
       });
+      notify.success('Para eklendi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Para ekleme hatası';
+      notify.apiError(e, 'Para ekleme hatasi');
+      hata = e?.message ?? 'Para ekleme hatasi';
       paraEkleModalAcik = false;
     } finally {
       paraEkleniyor = false;
@@ -315,12 +323,16 @@
             <Button size="sm" color="alternative" class="gap-2" onclick={pdfIndir}>
               <FileLinesSolid class="h-4 w-4" /> PDF
             </Button>
-            <Button size="sm" class="gap-2" onclick={duzenleAc}>
-              <EditOutline class="h-4 w-4" /> Düzenle
-            </Button>
-            <Button size="sm" color="red" class="gap-2" onclick={() => (silModalAcik = true)}>
-              <TrashBinSolid class="h-4 w-4" /> Sil
-            </Button>
+            <Can permission="hissedar.duzenle">
+              <Button size="sm" class="gap-2" onclick={duzenleAc}>
+                <EditOutline class="h-4 w-4" /> Düzenle
+              </Button>
+            </Can>
+            <Can permission="hissedar.sil">
+              <Button size="sm" color="red" class="gap-2" onclick={() => (silModalAcik = true)}>
+                <TrashBinSolid class="h-4 w-4" /> Sil
+              </Button>
+            </Can>
           </div>
         </div>
       </div>
@@ -432,9 +444,11 @@
           <WalletSolid class="mr-2 inline h-5 w-5" />
           Cüzdan
         </Heading>
-        <Button size="sm" color="green" class="gap-2" onclick={paraEkleAc}>
-          <PlusOutline class="h-4 w-4" /> Para Ekle
-        </Button>
+        <Can permission="hissedar.cuzdan">
+          <Button size="sm" color="green" class="gap-2" onclick={paraEkleAc}>
+            <PlusOutline class="h-4 w-4" /> Para Ekle
+          </Button>
+        </Can>
       </div>
 
       <!-- Bakiye Kartı -->

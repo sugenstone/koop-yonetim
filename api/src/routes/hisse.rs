@@ -5,6 +5,7 @@
 };
 use sqlx::PgPool;
 use serde::{Deserialize, Serialize};
+use crate::auth::AuthUser;
 use crate::errors::AppResult;
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -60,7 +61,8 @@ pub fn router(pool: PgPool) -> Router {
         .with_state(pool)
 }
 
-async fn get_hisseler(State(pool): State<PgPool>) -> AppResult<Json<Vec<Hisse>>> {
+async fn get_hisseler(user: AuthUser, State(pool): State<PgPool>) -> AppResult<Json<Vec<Hisse>>> {
+    user.require_izin(&pool, "hisse.goruntule").await?;
     let liste = sqlx::query_as::<_, Hisse>(
         "SELECT h.id, h.kod, h.durum, h.aciklama,
                 a.hissedar_id,
@@ -78,7 +80,8 @@ async fn get_hisseler(State(pool): State<PgPool>) -> AppResult<Json<Vec<Hisse>>>
     Ok(Json(liste))
 }
 
-async fn get_hisse(State(pool): State<PgPool>, Path(id): Path<i64>) -> AppResult<Json<Hisse>> {
+async fn get_hisse(user: AuthUser, State(pool): State<PgPool>, Path(id): Path<i64>) -> AppResult<Json<Hisse>> {
+    user.require_izin(&pool, "hisse.goruntule").await?;
     let hisse = sqlx::query_as::<_, Hisse>(
         "SELECT h.id, h.kod, h.durum, h.aciklama,
                 a.hissedar_id,
@@ -98,9 +101,11 @@ async fn get_hisse(State(pool): State<PgPool>, Path(id): Path<i64>) -> AppResult
 }
 
 async fn create_hisse(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Json(input): Json<CreateHisseInput>,
 ) -> AppResult<Json<Hisse>> {
+    user.require_izin(&pool, "hisse.yonet").await?;
     let son_no: Option<i64> = sqlx::query_scalar(
         "SELECT COUNT(*) FROM hisseler"
     )
@@ -125,9 +130,11 @@ async fn create_hisse(
 }
 
 async fn create_toplu(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Json(input): Json<CreateHisseTopluInput>,
 ) -> AppResult<Json<Vec<Hisse>>> {
+    user.require_izin(&pool, "hisse.yonet").await?;
     let mevcut: Option<i64> = sqlx::query_scalar("SELECT COUNT(*) FROM hisseler")
         .fetch_one(&pool)
         .await?;
@@ -153,10 +160,12 @@ async fn create_toplu(
 }
 
 async fn ata(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Path(hisse_id): Path<i64>,
     Json(input): Json<AtamaInput>,
 ) -> AppResult<Json<HisseAtama>> {
+    user.require_izin(&pool, "hisse.yonet").await?;
     let atama = sqlx::query_as::<_, HisseAtama>(
         "INSERT INTO hisse_atamalari (hisse_id, hissedar_id, tarih, ucret, aciklama)
          VALUES ($1, $2, $3, $4, $5)
@@ -181,9 +190,11 @@ async fn ata(
 }
 
 async fn get_atamalari(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Path(hisse_id): Path<i64>,
 ) -> AppResult<Json<Vec<HisseAtama>>> {
+    user.require_izin(&pool, "hisse.goruntule").await?;
     let liste = sqlx::query_as::<_, HisseAtama>(
         "SELECT a.id, a.hisse_id, a.hissedar_id,
                 (h.soyad || ' ' || h.ad) AS hissedar_adi,
@@ -199,9 +210,11 @@ async fn get_atamalari(
 }
 
 async fn delete_hisse(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
+    user.require_izin(&pool, "hisse.yonet").await?;
     sqlx::query("DELETE FROM hisseler WHERE id = $1")
         .bind(id)
         .execute(&pool)

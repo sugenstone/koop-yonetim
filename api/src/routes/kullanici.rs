@@ -12,8 +12,11 @@ use crate::errors::{AppError, AppResult};
 pub fn router(pool: PgPool) -> Router {
     Router::new()
         .route("/", get(list_kullanicilar).post(create_kullanici))
+        .route("/bekleyenler", get(list_bekleyenler))
         .route("/{id}", put(update_kullanici).delete(delete_kullanici))
         .route("/{id}/sifre", put(change_sifre))
+        .route("/{id}/onayla", axum::routing::post(onayla))
+        .route("/{id}/reddet", axum::routing::post(reddet))
         .with_state(pool)
 }
 
@@ -46,16 +49,31 @@ struct MesajResponse {
     mesaj: String,
 }
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct BekleyenKullanici {
+    pub id: i64,
+    pub ad: String,
+    pub email: String,
+    pub rol: String,
+    pub onay_durumu: String,
+    pub kayit_tarihi: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OnaylaInput {
+    pub rol: String,
+}
+
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
 async fn list_kullanicilar(
     user: AuthUser,
     State(pool): State<PgPool>,
 ) -> AppResult<Json<Vec<Kullanici>>> {
-    user.require_rol(&["admin"])?;
+    user.require_izin(&pool, "kullanici.goruntule").await?;
     let rows = sqlx::query_as::<_, Kullanici>(
         "SELECT id, ad, email, rol, aktif, created_at
-         FROM kullanicilar ORDER BY id",
+         FROM kullanicilar WHERE onay_durumu = 'onaylanmis' ORDER BY id",
     )
     .fetch_all(&pool)
     .await?;
@@ -67,7 +85,7 @@ async fn create_kullanici(
     State(pool): State<PgPool>,
     Json(input): Json<CreateKullaniciInput>,
 ) -> AppResult<Json<Kullanici>> {
-    user.require_rol(&["admin"])?;
+    user.require_izin(&pool, "kullanici.olustur").await?;
 
     let rol_gecerli = ["admin", "muhasebe", "uye", "izleyici"].contains(&input.rol.as_str());
     if !rol_gecerli {
@@ -78,8 +96,8 @@ async fn create_kullanici(
         .map_err(|e| AppError::Internal(e.into()))?;
 
     let k = sqlx::query_as::<_, Kullanici>(
-        "INSERT INTO kullanicilar (ad, email, sifre_hash, rol, aktif)
-         VALUES ($1, $2, $3, $4, true)
+        "INSERT INTO kullanicilar (ad, email, sifre_hash, rol, aktif, onay_durumu)
+         VALUES ($1, $2, $3, $4, true, 'onaylanmis')
          RETURNING id, ad, email, rol, aktif, created_at",
     )
     .bind(input.ad)
@@ -98,7 +116,7 @@ async fn update_kullanici(
     Path(id): Path<i64>,
     Json(input): Json<UpdateKullaniciInput>,
 ) -> AppResult<Json<Kullanici>> {
-    user.require_rol(&["admin"])?;
+    user.require_izin(&pool, "kullanici.duzenle").await?;
 
     if let Some(rol) = &input.rol {
         if !["admin", "muhasebe", "uye", "izleyici"].contains(&rol.as_str()) {
@@ -132,7 +150,7 @@ async fn delete_kullanici(
     State(pool): State<PgPool>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<MesajResponse>> {
-    user.require_rol(&["admin"])?;
+    user.require_izin(&pool, "kullanici.sil").await?;
     if user.id() == id {
         return Err(AppError::BadRequest("Kendi hesabinizi pasifize edemezsiniz".into()));
     }
@@ -184,4 +202,99 @@ async fn change_sifre(
         .await?;
 
     Ok(Json(MesajResponse { mesaj: "Sifre guncellendi".into() }))
+}
+
+// --- Onay akisi ----------------------------------------------------------------
+
+
+async fn list_bekleyenler(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+) -> AppResult<Json<Vec<BekleyenKullanici>>> {
+    user.require_izin(&pool, "kullanici.onayla").await?;
+    let rows = sqlx::query_as::<_, BekleyenKullanici>(
+        "SELECT id, ad, email, rol, onay_durumu, kayit_tarihi
+         FROM kullanicilar
+         WHERE onay_durumu = 'beklemede'
+         ORDER BY kayit_tarihi DESC",
+    )
+    .fetch_all(&pool)
+    .await?;
+    Ok(Json(rows))
+}
+
+async fn onayla(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(id): Path<i64>,
+    Json(input): Json<OnaylaInput>,
+) -> AppResult<Json<Kullanici>> {
+    user.require_izin(&pool, "kullanici.onayla").await?;
+
+    if !["admin", "muhasebe", "uye", "izleyici"].contains(&input.rol.as_str()) {
+        return Err(AppError::BadRequest("Gecersiz rol".into()));
+    }
+
+    let k = sqlx::query_as::<_, Kullanici>(
+        "UPDATE kullanicilar
+            SET rol = $1, aktif = true, onay_durumu = 'onaylanmis',
+                onaylayan_id = $2, onay_tarihi = NOW(), updated_at = NOW()
+          WHERE id = $3 AND onay_durumu = 'beklemede'
+         RETURNING id, ad, email, rol, aktif, created_at",
+    )
+    .bind(&input.rol)
+    .bind(user.id())
+    .bind(id)
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Bekleyen kullanici bulunamadi".into()))?;
+
+    let email = k.email.clone();
+    let ad = k.ad.clone();
+    let rol = k.rol.clone();
+    tokio::spawn(async move {
+        let body = format!(
+            "<h3>Merhaba {}</h3>\
+             <p>Kayit basvurunuz <b>onaylandi</b>.</p>\
+             <p>Rolunuz: <b>{}</b></p>\
+             <p>Simdi giris yapabilirsiniz.</p>",
+            ad, rol
+        );
+        crate::mail::send(&email, "Hesabiniz onaylandi", &body).await;
+    });
+
+    Ok(Json(k))
+}
+
+async fn reddet(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<MesajResponse>> {
+    user.require_izin(&pool, "kullanici.onayla").await?;
+
+    let row: Option<(String, String)> = sqlx::query_as(
+        "UPDATE kullanicilar
+            SET onay_durumu = 'reddedilmis', aktif = false,
+                onaylayan_id = $1, onay_tarihi = NOW(), updated_at = NOW()
+          WHERE id = $2 AND onay_durumu = 'beklemede'
+         RETURNING ad, email",
+    )
+    .bind(user.id())
+    .bind(id)
+    .fetch_optional(&pool)
+    .await?;
+
+    let (ad, email) = row.ok_or_else(|| AppError::NotFound("Bekleyen kullanici bulunamadi".into()))?;
+
+    tokio::spawn(async move {
+        let body = format!(
+            "<h3>Merhaba {}</h3>\
+             <p>Uzgunuz, kayit basvurunuz reddedildi.</p>",
+            ad
+        );
+        crate::mail::send(&email, "Kayit basvurunuz reddedildi", &body).await;
+    });
+
+    Ok(Json(MesajResponse { mesaj: "Kullanici kaydi reddedildi".into() }))
 }

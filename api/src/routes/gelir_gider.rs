@@ -5,6 +5,7 @@
 };
 use sqlx::PgPool;
 use serde::{Deserialize, Serialize};
+use crate::auth::AuthUser;
 use crate::errors::AppResult;
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -56,7 +57,8 @@ pub fn router(pool: PgPool) -> Router {
         .with_state(pool)
 }
 
-async fn get_kategoriler(State(pool): State<PgPool>) -> AppResult<Json<Vec<GelirGiderKategori>>> {
+async fn get_kategoriler(user: AuthUser, State(pool): State<PgPool>) -> AppResult<Json<Vec<GelirGiderKategori>>> {
+    user.require_izin(&pool, "gelir_gider.goruntule").await?;
     let liste = sqlx::query_as::<_, GelirGiderKategori>(
         "SELECT id, ad, tip, aciklama, aktif, created_at, updated_at
          FROM gelir_gider_kategorileri ORDER BY tip, ad"
@@ -67,9 +69,11 @@ async fn get_kategoriler(State(pool): State<PgPool>) -> AppResult<Json<Vec<Gelir
 }
 
 async fn create_kategori(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Json(input): Json<CreateKategoriInput>,
 ) -> AppResult<Json<GelirGiderKategori>> {
+    user.require_izin(&pool, "gelir_gider.yonet").await?;
     let k = sqlx::query_as::<_, GelirGiderKategori>(
         "INSERT INTO gelir_gider_kategorileri (ad, tip, aciklama)
          VALUES ($1, $2, $3)
@@ -84,10 +88,12 @@ async fn create_kategori(
 }
 
 async fn update_kategori(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Path(id): Path<i64>,
     Json(input): Json<CreateKategoriInput>,
 ) -> AppResult<Json<GelirGiderKategori>> {
+    user.require_izin(&pool, "gelir_gider.yonet").await?;
     let k = sqlx::query_as::<_, GelirGiderKategori>(
         "UPDATE gelir_gider_kategorileri SET ad=$1, tip=$2, aciklama=$3, updated_at=NOW()
          WHERE id=$4
@@ -103,9 +109,11 @@ async fn update_kategori(
 }
 
 async fn delete_kategori(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
+    user.require_izin(&pool, "gelir_gider.yonet").await?;
     sqlx::query("DELETE FROM gelir_gider_kategorileri WHERE id = $1")
         .bind(id)
         .execute(&pool)
@@ -113,7 +121,8 @@ async fn delete_kategori(
     Ok(Json(serde_json::json!({ "mesaj": "Kategori silindi" })))
 }
 
-async fn get_kayitlar(State(pool): State<PgPool>) -> AppResult<Json<Vec<GelirGiderKayit>>> {
+async fn get_kayitlar(user: AuthUser, State(pool): State<PgPool>) -> AppResult<Json<Vec<GelirGiderKayit>>> {
+    user.require_izin(&pool, "gelir_gider.goruntule").await?;
     let liste = sqlx::query_as::<_, GelirGiderKayit>(
         "SELECT g.id, g.kasa_id, g.kategori_id, k.ad AS kategori_ad,
                 g.tarih, g.tutar, g.aciklama, g.kasa_hareketi_id, g.created_at
@@ -127,9 +136,11 @@ async fn get_kayitlar(State(pool): State<PgPool>) -> AppResult<Json<Vec<GelirGid
 }
 
 async fn create_kayit(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Json(input): Json<CreateKayitInput>,
 ) -> AppResult<Json<GelirGiderKayit>> {
+    user.require_izin(&pool, "gelir_gider.yonet").await?;
     let mut tx = pool.begin().await?;
 
     // Kategori tipini Ã¶ÄŸren (gelir/gider)
@@ -200,9 +211,11 @@ async fn create_kayit(
 }
 
 async fn delete_kayit(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
+    user.require_izin(&pool, "gelir_gider.yonet").await?;
     sqlx::query("DELETE FROM gelir_gider_kayitlari WHERE id = $1")
         .bind(id)
         .execute(&pool)

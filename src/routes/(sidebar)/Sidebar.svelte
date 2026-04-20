@@ -8,8 +8,11 @@
     UsersSolid,
     CalendarMonthSolid,
     ChartLineUpOutline,
-    ExclamationCircleOutline
+    ExclamationCircleOutline,
+    UserSettingsSolid
   } from 'flowbite-svelte-icons';
+  import { getCurrentUser } from '$lib/api-client';
+  import { myPermissions } from '$lib/permissions';
 
   interface Props {
     drawerHidden: boolean;
@@ -35,15 +38,31 @@
     closeDrawer();
   });
 
-  let posts = [
-    { name: 'Dashboard', Icon: ChartPieOutline, href: '/dashboard' },
-    { name: 'Kasa', Icon: WalletSolid, href: '/kasa' },
-    { name: 'Gelir / Gider', Icon: ChartLineUpOutline, href: '/gelir-gider' },
-    { name: 'Borçlar', Icon: ExclamationCircleOutline, href: '/borclar' },
-    { name: 'Hissedar', Icon: UsersSolid, href: '/hissedar' },
-    { name: 'Dönem', Icon: CalendarMonthSolid, href: '/donem' },
-    { name: 'Hisse', Icon: LayersSolid, href: '/hisse' }
+  const currentUser = getCurrentUser();
+  const isAdmin = currentUser?.rol === 'admin';
+
+  // Izin bazli filtreleme: admin her seyi gorur, diger roller izin anahtarina gore
+  function izinVar(anahtar: string | null): boolean {
+    if (!anahtar) return true; // izin gerektirmeyen menu (dashboard vs.)
+    if (isAdmin) return true;
+    return $myPermissions.has(anahtar);
+  }
+
+  type MenuItem = { name: string; Icon: any; href: string; izin: string | null };
+
+  const tumMenuler: MenuItem[] = [
+    { name: 'Dashboard', Icon: ChartPieOutline, href: '/dashboard', izin: null },
+    { name: 'Kasa', Icon: WalletSolid, href: '/kasa', izin: 'kasa.goruntule' },
+    { name: 'Gelir / Gider', Icon: ChartLineUpOutline, href: '/gelir-gider', izin: 'gelir_gider.goruntule' },
+    { name: 'Borçlar', Icon: ExclamationCircleOutline, href: '/borclar', izin: 'borc.goruntule' },
+    { name: 'Hissedar', Icon: UsersSolid, href: '/hissedar', izin: 'hissedar.goruntule' },
+    { name: 'Dönem', Icon: CalendarMonthSolid, href: '/donem', izin: 'donem.goruntule' },
+    { name: 'Hisse', Icon: LayersSolid, href: '/hisse', izin: 'hisse.goruntule' },
+    { name: 'Kullanıcılar', Icon: UserSettingsSolid, href: '/kullanicilar', izin: 'kullanici.goruntule' },
+    { name: 'Rol & İzinler', Icon: UserSettingsSolid, href: '/roller', izin: 'rol.yonet' }
   ];
+
+  let posts = $derived(tumMenuler.filter((m) => izinVar(m.izin)));
 </script>
 
 <SidebarButton breakpoint="lg" onclick={sidebarUi.toggle} class="fixed top-[22px] z-40 mb-2" />

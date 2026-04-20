@@ -32,6 +32,8 @@
   } from '$lib/tauri-api';
   import DataTable from '$lib/components/DataTable.svelte';
   import type { DataTableColumn } from '$lib/components/dataTableUtils';
+  import Can from '$lib/Can.svelte';
+  import { notify } from '$lib/toast';
 
   // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -125,9 +127,11 @@
       };
       await gelirGiderApi.create(input);
       modalAcik = false;
+      notify.success(fTip === 'gelir' ? 'Gelir kaydedildi' : 'Gider kaydedildi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Kayıt hatası';
+      notify.apiError(e, 'Kayit hatasi');
+      hata = e?.message ?? 'Kayit hatasi';
     } finally {
       kaydediliyor = false;
     }
@@ -148,9 +152,11 @@
       await gelirGiderApi.delete(silinecekId);
       silModalAcik = false;
       silinecekId = null;
+      notify.success('Kayit silindi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Silme hatası';
+      notify.apiError(e, 'Silme hatasi');
+      hata = e?.message ?? 'Silme hatasi';
     } finally {
       kaydediliyor = false;
     }
@@ -214,12 +220,16 @@
       <Button color="alternative" href="/gelir-gider/kategoriler" class="gap-2">
         <TagSolid class="h-4 w-4" /> Kategoriler
       </Button>
-      <Button color="green" onclick={() => yeniAc('gelir')} class="gap-2">
-        <ArrowUpOutline class="h-4 w-4" /> Gelir Ekle
-      </Button>
-      <Button color="red" onclick={() => yeniAc('gider')} class="gap-2">
-        <ArrowDownOutline class="h-4 w-4" /> Gider Ekle
-      </Button>
+      <Can permission="gelir_gider.yonet">
+        <Button color="green" onclick={() => yeniAc('gelir')} class="gap-2">
+          <ArrowUpOutline class="h-4 w-4" /> Gelir Ekle
+        </Button>
+      </Can>
+      <Can permission="gelir_gider.yonet">
+        <Button color="red" onclick={() => yeniAc('gider')} class="gap-2">
+          <ArrowDownOutline class="h-4 w-4" /> Gider Ekle
+        </Button>
+      </Can>
     </div>
   </div>
 
@@ -349,13 +359,15 @@
           {/if}
           {#if visibleCols.has('islemler')}
             <TableBodyCell class="text-center">
-              <button
-                class="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-gray-700"
-                onclick={() => silAc(k.id)}
-                title="Sil"
-              >
-                <TrashBinSolid class="h-4 w-4" />
-              </button>
+              <Can permission="gelir_gider.yonet">
+                <button
+                  class="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-gray-700"
+                  onclick={() => silAc(k.id)}
+                  title="Sil"
+                >
+                  <TrashBinSolid class="h-4 w-4" />
+                </button>
+              </Can>
             </TableBodyCell>
           {/if}
         </TableBodyRow>
@@ -364,12 +376,16 @@
         <div class="flex flex-col items-center justify-center py-10">
           <P class="mb-4 text-gray-500 dark:text-gray-400">Henüz kayıt yok</P>
           <div class="flex gap-3">
-            <Button size="sm" color="green" class="gap-2" onclick={() => yeniAc('gelir')}>
-              <ArrowUpOutline class="h-4 w-4" /> Gelir Ekle
-            </Button>
-            <Button size="sm" color="red" class="gap-2" onclick={() => yeniAc('gider')}>
-              <ArrowDownOutline class="h-4 w-4" /> Gider Ekle
-            </Button>
+            <Can permission="gelir_gider.yonet">
+              <Button size="sm" color="green" class="gap-2" onclick={() => yeniAc('gelir')}>
+                <ArrowUpOutline class="h-4 w-4" /> Gelir Ekle
+              </Button>
+            </Can>
+            <Can permission="gelir_gider.yonet">
+              <Button size="sm" color="red" class="gap-2" onclick={() => yeniAc('gider')}>
+                <ArrowDownOutline class="h-4 w-4" /> Gider Ekle
+              </Button>
+            </Can>
           </div>
         </div>
       {/snippet}

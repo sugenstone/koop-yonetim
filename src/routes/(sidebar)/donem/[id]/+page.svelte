@@ -60,6 +60,8 @@
   import DataTable from '$lib/components/DataTable.svelte';
   import type { DataTableColumn } from '$lib/components/dataTableUtils';
   import { exportPdf, formatTL, formatTarih } from '$lib/pdf';
+  import Can from '$lib/Can.svelte';
+  import { notify } from '$lib/toast';
 
   // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -158,9 +160,11 @@
         aktif: fDonemAktif
       });
       donemModalAcik = false;
+      notify.success('Donem guncellendi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Güncelleme hatası';
+      notify.apiError(e, 'Guncelleme hatasi');
+      hata = e?.message ?? 'Guncelleme hatasi';
     } finally {
       kaydediliyor = false;
     }
@@ -171,9 +175,11 @@
     kaydediliyor = true;
     try {
       await donemApi.delete(donem.id);
+      notify.success('Donem silindi');
       goto('/donem');
     } catch (e: any) {
-      hata = e?.toString() ?? 'Silme hatası';
+      notify.apiError(e, 'Silme hatasi');
+      hata = e?.message ?? 'Silme hatasi';
       kaydediliyor = false;
     }
   }
@@ -216,9 +222,11 @@
         });
       }
       toplantIModalAcik = false;
+      notify.success(duzenlenecekToplanti ? 'Toplanti guncellendi' : 'Toplanti eklendi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Kayıt hatası';
+      notify.apiError(e, 'Kayit hatasi');
+      hata = e?.message ?? 'Kayit hatasi';
     } finally {
       kaydediliyor = false;
     }
@@ -231,9 +239,11 @@
       await toplantIApi.delete(silinecekToplantI.id);
       silToplantIModal = false;
       silinecekToplantI = null;
+      notify.success('Toplanti silindi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Silme hatası';
+      notify.apiError(e, 'Silme hatasi');
+      hata = e?.message ?? 'Silme hatasi';
     } finally {
       kaydediliyor = false;
     }
@@ -275,9 +285,11 @@
         });
       }
       kararModalAcik = false;
+      notify.success(duzenlenecekKarar ? 'Karar guncellendi' : 'Karar eklendi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Kayıt hatası';
+      notify.apiError(e, 'Kayit hatasi');
+      hata = e?.message ?? 'Kayit hatasi';
     } finally {
       kaydediliyor = false;
     }
@@ -290,9 +302,11 @@
       await kararApi.delete(silinecekKarar.id);
       silKararModal = false;
       silinecekKarar = null;
+      notify.success('Karar silindi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Silme hatası';
+      notify.apiError(e, 'Silme hatasi');
+      hata = e?.message ?? 'Silme hatasi';
     } finally {
       kaydediliyor = false;
     }
@@ -306,9 +320,11 @@
     borcSonuc = null;
     try {
       borcSonuc = await aidatApi.borcOlustur(donemId);
+      notify.success('Borc kayitlari olusturuldu');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Borç oluşturma hatası';
+      notify.apiError(e, 'Borc olusturma hatasi');
+      hata = e?.message ?? 'Borc olusturma hatasi';
     } finally {
       borcOlusturuluyor = false;
     }
@@ -370,8 +386,10 @@
       });
       await yukle();          // ← önce tabloyu yenile
       tahsilatSonuc = sonuc;  // ← sonra başarı ekranını göster
+      notify.success('Tahsilat yapildi');
     } catch (e: any) {
-      hata = e?.toString() ?? 'Tahsilat hatası';
+      notify.apiError(e, 'Tahsilat hatasi');
+      hata = e?.message ?? 'Tahsilat hatasi';
       tahsilatModal = false;
     } finally {
       tahsilEdiliyor = false;
@@ -550,12 +568,16 @@
             <Button size="sm" color="alternative" class="gap-2" onclick={pdfIndir}>
               <FileLinesSolid class="h-4 w-4" /> PDF
             </Button>
-            <Button size="sm" color="light" class="gap-2" onclick={donemDuzenleAc}>
-              <EditOutline class="h-4 w-4" /> Düzenle
-            </Button>
-            <Button size="sm" color="red" class="gap-2" onclick={() => (silDonemModal = true)}>
-              <TrashBinSolid class="h-4 w-4" /> Sil
-            </Button>
+            <Can permission="donem.yonet">
+              <Button size="sm" color="light" class="gap-2" onclick={donemDuzenleAc}>
+                <EditOutline class="h-4 w-4" /> Düzenle
+              </Button>
+            </Can>
+            <Can permission="donem.yonet">
+              <Button size="sm" color="red" class="gap-2" onclick={() => (silDonemModal = true)}>
+                <TrashBinSolid class="h-4 w-4" /> Sil
+              </Button>
+            </Can>
           </div>
         </div>
       </div>
@@ -582,9 +604,11 @@
     <!-- Toplantılar -->
     <div class="mb-4 flex items-center justify-between">
       <Heading tag="h2" class="text-lg font-semibold text-gray-900 dark:text-white">Toplantılar</Heading>
-      <Button size="sm" class="gap-2" onclick={toplantIYeniAc}>
-        <CalendarPlusOutline class="h-4 w-4" /> Toplantı Ekle
-      </Button>
+      <Can permission="toplanti.yonet">
+        <Button size="sm" class="gap-2" onclick={toplantIYeniAc}>
+          <CalendarPlusOutline class="h-4 w-4" /> Toplantı Ekle
+        </Button>
+      </Can>
     </div>
 
     {#if toplantilar.length === 0}
@@ -625,20 +649,24 @@
                 </div>
               </button>
               <div class="ml-3 flex shrink-0 gap-1">
-                <button
-                  class="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-gray-700"
-                  onclick={() => toplantIDuzenleAc(t)}
-                  title="Düzenle"
-                >
-                  <EditOutline class="h-4 w-4" />
-                </button>
-                <button
-                  class="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-gray-700"
-                  onclick={() => { silinecekToplantI = t; silToplantIModal = true; }}
-                  title="Sil"
-                >
-                  <TrashBinSolid class="h-4 w-4" />
-                </button>
+                <Can permission="toplanti.yonet">
+                  <button
+                    class="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-gray-700"
+                    onclick={() => toplantIDuzenleAc(t)}
+                    title="Düzenle"
+                  >
+                    <EditOutline class="h-4 w-4" />
+                  </button>
+                </Can>
+                <Can permission="toplanti.yonet">
+                  <button
+                    class="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-gray-700"
+                    onclick={() => { silinecekToplantI = t; silToplantIModal = true; }}
+                    title="Sil"
+                  >
+                    <TrashBinSolid class="h-4 w-4" />
+                  </button>
+                </Can>
               </div>
             </div>
 
@@ -651,12 +679,14 @@
                     <ClipboardCheckSolid class="h-4 w-4" />
                     Alınan Kararlar
                   </div>
-                  <button
-                    class="flex items-center gap-1 text-xs font-medium text-primary-600 hover:underline dark:text-primary-400"
-                    onclick={() => kararYeniAc(t.id)}
-                  >
-                    <PlusOutline class="h-3.5 w-3.5" /> Karar Ekle
-                  </button>
+                  <Can permission="toplanti.yonet">
+                    <button
+                      class="flex items-center gap-1 text-xs font-medium text-primary-600 hover:underline dark:text-primary-400"
+                      onclick={() => kararYeniAc(t.id)}
+                    >
+                      <PlusOutline class="h-3.5 w-3.5" /> Karar Ekle
+                    </button>
+                  </Can>
                 </div>
 
                 {#if t.kararlar.length === 0}
@@ -677,20 +707,24 @@
                         {/if}
                         <p class="flex-1 text-sm text-gray-800 dark:text-gray-200">{k.aciklama}</p>
                         <div class="flex shrink-0 gap-1">
-                          <button
-                            class="rounded p-1 text-gray-400 hover:text-primary-600"
-                            onclick={() => kararDuzenleAc(k)}
-                            title="Düzenle"
-                          >
-                            <EditOutline class="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            class="rounded p-1 text-gray-400 hover:text-red-600"
-                            onclick={() => { silinecekKarar = k; silKararModal = true; }}
-                            title="Sil"
-                          >
-                            <TrashBinSolid class="h-3.5 w-3.5" />
-                          </button>
+                          <Can permission="toplanti.yonet">
+                            <button
+                              class="rounded p-1 text-gray-400 hover:text-primary-600"
+                              onclick={() => kararDuzenleAc(k)}
+                              title="Düzenle"
+                            >
+                              <EditOutline class="h-3.5 w-3.5" />
+                            </button>
+                          </Can>
+                          <Can permission="toplanti.yonet">
+                            <button
+                              class="rounded p-1 text-gray-400 hover:text-red-600"
+                              onclick={() => { silinecekKarar = k; silKararModal = true; }}
+                              title="Sil"
+                            >
+                              <TrashBinSolid class="h-3.5 w-3.5" />
+                            </button>
+                          </Can>
                         </div>
                       </li>
                     {/each}
@@ -706,9 +740,11 @@
     <!-- Aidat Borçları -->
     <div class="mb-4 mt-8 flex items-center justify-between">
       <Heading tag="h2" class="text-lg font-semibold text-gray-900 dark:text-white">Aidat Borçları</Heading>
-      <Button size="sm" color="green" class="gap-2" onclick={() => (borcOlusturModal = true)}>
-        <CashOutline class="h-4 w-4" /> Borç Kaydı Oluştur
-      </Button>
+      <Can permission="borc.yonet">
+        <Button size="sm" color="green" class="gap-2" onclick={() => (borcOlusturModal = true)}>
+          <CashOutline class="h-4 w-4" /> Borç Kaydı Oluştur
+        </Button>
+      </Can>
     </div>
 
     {#if borclar.length === 0}
@@ -784,9 +820,11 @@
             {#if visibleCols.has('islemler')}
               <TableBodyCell>
                 {#if !b.odendi}
-                  <Button size="xs" color="green" class="gap-1" onclick={() => tahsilatAc(b)}>
-                    <CashOutline class="h-3.5 w-3.5" /> Tahsilat
-                  </Button>
+                  <Can permission="borc.yonet">
+                    <Button size="xs" color="green" class="gap-1" onclick={() => tahsilatAc(b)}>
+                      <CashOutline class="h-3.5 w-3.5" /> Tahsilat
+                    </Button>
+                  </Can>
                 {/if}
               </TableBodyCell>
             {/if}

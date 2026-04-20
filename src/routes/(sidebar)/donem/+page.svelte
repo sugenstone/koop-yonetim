@@ -33,6 +33,8 @@
   import DataTable from '$lib/components/DataTable.svelte';
   import type { DataTableColumn } from '$lib/components/dataTableUtils';
   import { exportPdf, formatTL } from '$lib/pdf';
+  import Can from '$lib/Can.svelte';
+  import { notify } from '$lib/toast';
 
   // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -136,9 +138,11 @@
         });
       }
       modalAcik = false;
+      notify.success(duzenle ? 'Donem guncellendi' : 'Donem olusturuldu');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Kayıt hatası';
+      notify.apiError(e, 'Kayit hatasi');
+      hata = e?.message ?? 'Kayit hatasi';
     } finally {
       kaydediliyor = false;
     }
@@ -151,9 +155,11 @@
       await donemApi.delete(silinecek.id);
       silModalAcik = false;
       silinecek = null;
+      notify.success('Donem silindi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Silme hatası';
+      notify.apiError(e, 'Silme hatasi');
+      hata = e?.message ?? 'Silme hatasi';
     } finally {
       kaydediliyor = false;
     }
@@ -193,10 +199,12 @@
         <FileLinesSolid class="h-4 w-4" />
         PDF
       </Button>
-      <Button onclick={yeniAc} class="gap-2">
-        <PlusOutline class="h-4 w-4" />
-        Yeni Dönem
-      </Button>
+      <Can permission="donem.yonet">
+        <Button onclick={yeniAc} class="gap-2">
+          <PlusOutline class="h-4 w-4" />
+          Yeni Dönem
+        </Button>
+      </Can>
     </div>
   </div>
 
@@ -258,20 +266,24 @@
           {#if visibleCols.has('islemler')}
             <TableBodyCell>
               <div class="flex items-center gap-1" onclick={(e) => e.stopPropagation()} role="presentation">
-                <button
-                  class="rounded p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-gray-700"
-                  onclick={() => duzenleAc(d)}
-                  title="Düzenle"
-                >
-                  <EditOutline class="h-4 w-4" />
-                </button>
-                <button
-                  class="rounded p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-gray-700"
-                  onclick={() => silAc(d)}
-                  title="Sil"
-                >
-                  <TrashBinSolid class="h-4 w-4" />
-                </button>
+                <Can permission="donem.yonet">
+                  <button
+                    class="rounded p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-gray-700"
+                    onclick={() => duzenleAc(d)}
+                    title="Düzenle"
+                  >
+                    <EditOutline class="h-4 w-4" />
+                  </button>
+                </Can>
+                <Can permission="donem.yonet">
+                  <button
+                    class="rounded p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-gray-700"
+                    onclick={() => silAc(d)}
+                    title="Sil"
+                  >
+                    <TrashBinSolid class="h-4 w-4" />
+                  </button>
+                </Can>
                 <button
                   class="rounded p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-gray-700"
                   onclick={() => goto(`/donem/${d.id}`)}
@@ -288,9 +300,11 @@
         <div class="flex flex-col items-center justify-center py-6">
           <CalendarMonthSolid class="mb-3 h-12 w-12 text-gray-400" />
           <p class="text-gray-500 dark:text-gray-400">Henüz dönem eklenmemiş</p>
-          <Button size="sm" class="mt-4 gap-2" onclick={yeniAc}>
-            <PlusOutline class="h-4 w-4" /> Dönem Ekle
-          </Button>
+          <Can permission="donem.yonet">
+            <Button size="sm" class="mt-4 gap-2" onclick={yeniAc}>
+              <PlusOutline class="h-4 w-4" /> Dönem Ekle
+            </Button>
+          </Can>
         </div>
       {/snippet}
     </DataTable>

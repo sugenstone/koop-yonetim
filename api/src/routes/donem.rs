@@ -5,6 +5,7 @@
 };
 use sqlx::PgPool;
 use serde::{Deserialize, Serialize};
+use crate::auth::AuthUser;
 use crate::errors::AppResult;
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -32,7 +33,8 @@ pub fn router(pool: PgPool) -> Router {
         .with_state(pool)
 }
 
-async fn get_donemler(State(pool): State<PgPool>) -> AppResult<Json<Vec<Donem>>> {
+async fn get_donemler(user: AuthUser, State(pool): State<PgPool>) -> AppResult<Json<Vec<Donem>>> {
+    user.require_izin(&pool, "donem.goruntule").await?;
     let liste = sqlx::query_as::<_, Donem>(
         "SELECT id, ay, yil, hisse_basi_aidat, aktif, created_at, updated_at
          FROM donemler ORDER BY yil DESC, ay DESC"
@@ -42,7 +44,8 @@ async fn get_donemler(State(pool): State<PgPool>) -> AppResult<Json<Vec<Donem>>>
     Ok(Json(liste))
 }
 
-async fn get_donem(State(pool): State<PgPool>, Path(id): Path<i64>) -> AppResult<Json<Donem>> {
+async fn get_donem(user: AuthUser, State(pool): State<PgPool>, Path(id): Path<i64>) -> AppResult<Json<Donem>> {
+    user.require_izin(&pool, "donem.goruntule").await?;
     let donem = sqlx::query_as::<_, Donem>(
         "SELECT id, ay, yil, hisse_basi_aidat, aktif, created_at, updated_at
          FROM donemler WHERE id = $1"
@@ -54,9 +57,11 @@ async fn get_donem(State(pool): State<PgPool>, Path(id): Path<i64>) -> AppResult
 }
 
 async fn create_donem(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Json(input): Json<CreateDonemInput>,
 ) -> AppResult<Json<Donem>> {
+    user.require_izin(&pool, "donem.yonet").await?;
     let donem = sqlx::query_as::<_, Donem>(
         "INSERT INTO donemler (ay, yil, hisse_basi_aidat)
          VALUES ($1, $2, $3)
@@ -71,10 +76,12 @@ async fn create_donem(
 }
 
 async fn update_donem(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Path(id): Path<i64>,
     Json(input): Json<CreateDonemInput>,
 ) -> AppResult<Json<Donem>> {
+    user.require_izin(&pool, "donem.yonet").await?;
     let donem = sqlx::query_as::<_, Donem>(
         "UPDATE donemler SET ay=$1, yil=$2, hisse_basi_aidat=$3, updated_at=NOW()
          WHERE id = $4
@@ -90,9 +97,11 @@ async fn update_donem(
 }
 
 async fn delete_donem(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
+    user.require_izin(&pool, "donem.yonet").await?;
     sqlx::query("DELETE FROM donemler WHERE id = $1")
         .bind(id)
         .execute(&pool)

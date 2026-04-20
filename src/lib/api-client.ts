@@ -19,6 +19,53 @@ export function clearToken(): void {
 	localStorage.removeItem(TOKEN_KEY);
 }
 
+/**
+ * JWT payload'unu decode eder (dogrulama yapmaz - sadece okuma).
+ * Rol bazli UI gostermek icin kullanilir (gercek yetki backend'de kontrol edilir).
+ */
+export interface JwtPayload {
+	sub: number;
+	email: string;
+	rol: string;
+	exp: number;
+}
+
+export function getCurrentUser(): JwtPayload | null {
+	const token = getToken();
+	if (!token) return null;
+	try {
+		const parts = token.split('.');
+		if (parts.length !== 3) return null;
+		const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+		// Süre kontrolü
+		if (payload.exp && payload.exp * 1000 < Date.now()) {
+			clearToken();
+			return null;
+		}
+		return payload as JwtPayload;
+	} catch {
+		return null;
+	}
+}
+
+export function isAdmin(): boolean {
+	return getCurrentUser()?.rol === 'admin';
+}
+
+/**
+ * Oturumu kapat: token sil + login sayfasına yönlendir.
+ */
+export function logout(): void {
+	clearToken();
+	if (typeof localStorage !== 'undefined') {
+		localStorage.removeItem('koop_kullanici');
+		localStorage.removeItem('koop_izinler');
+	}
+	if (typeof window !== 'undefined') {
+		window.location.href = '/authentication/sign-in';
+	}
+}
+
 export class ApiError extends Error {
 	status: number;
 	constructor(message: string, status: number) {
@@ -46,6 +93,46 @@ const MAPPING: Record<string, EndpointMapping> = {
 		path: () => '/api/auth/giris',
 		body: (a) => ({ email: a.email, sifre: a.sifre })
 	},
+	kayit: {
+		method: 'POST',
+		path: () => '/api/auth/kayit',
+		body: (a) => ({ ad: a.ad, email: a.email, sifre: a.sifre })
+	},
+
+	// ─── Kullanıcı Yönetimi (admin) ───────────────────────────────────────
+	get_kullanicilar: { method: 'GET', path: () => '/api/kullanicilar' },
+	get_bekleyenler: { method: 'GET', path: () => '/api/kullanicilar/bekleyenler' },
+	onayla_kullanici: {
+		method: 'POST',
+		path: (a) => `/api/kullanicilar/${a.id}/onayla`,
+		body: (a) => ({ rol: a.rol })
+	},
+	reddet_kullanici: {
+		method: 'POST',
+		path: (a) => `/api/kullanicilar/${a.id}/reddet`
+	},
+	create_kullanici: { method: 'POST', path: () => '/api/kullanicilar', body: (a) => a.input },
+	update_kullanici: {
+		method: 'PUT',
+		path: (a) => `/api/kullanicilar/${a.input.id}`,
+		body: (a) => a.input
+	},
+	delete_kullanici: { method: 'DELETE', path: (a) => `/api/kullanicilar/${a.id}` },
+	change_kullanici_sifre: {
+		method: 'PUT',
+		path: (a) => `/api/kullanicilar/${a.id}/sifre`,
+		body: (a) => a.input
+	},
+
+	// ─── İzin/Rol Yönetimi ────────────────────────────────────────────────
+	get_izinler: { method: 'GET', path: () => '/api/izinler' },
+	get_rol_izinleri: { method: 'GET', path: (a) => `/api/izinler/roller/${a.rol}` },
+	set_rol_izinleri: {
+		method: 'PUT',
+		path: (a) => `/api/izinler/roller/${a.rol}`,
+		body: (a) => ({ izin_ids: a.izin_ids })
+	},
+	get_benim_izinlerim: { method: 'GET', path: () => '/api/izinler/benim' },
 
 	// ─── Kasa ─────────────────────────────────────────────────────────────
 	get_kasalar: { method: 'GET', path: () => '/api/kasalar' },
@@ -296,7 +383,14 @@ export async function invokeApi<T = any>(cmd: string, args: any = {}): Promise<T
 
 	if (!res.ok) {
 		const msg = (data && (data.hata || data.error || data.message)) || `HTTP ${res.status}`;
-		throw new ApiError(msg, res.status);
+		const err = new ApiError(msg, res.status);
+		// 403 izin hatalarini otomatik toast yap (SSR guard)
+		if (res.status === 403 && typeof window !== 'undefined') {
+			import('svelte-sonner').then(({ toast }) => {
+				toast.warning(msg, { description: 'Bu islem icin yetkiniz yok.' });
+			}).catch(() => {});
+		}
+		throw err;
 	}
 
 	return data as T;

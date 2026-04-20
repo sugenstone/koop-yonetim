@@ -26,6 +26,9 @@ importers:
       flowbite-svelte-icons:
         specifier: ^3.0.0
         version: 3.0.0(svelte@5.43.10)
+      svelte-sonner:
+        specifier: ^1.1.0
+        version: 1.1.0(svelte@5.43.10)
       tailwind-merge:
         specifier: ^3.3.1
         version: 3.4.0
@@ -2022,6 +2025,11 @@ packages:
     peerDependencies:
       svelte: ^5.0.0
 
+  runed@0.28.0:
+    resolution: {integrity: sha512-k2xx7RuO9hWcdd9f+8JoBeqWtYrm5CALfgpkg2YDB80ds/QE4w0qqu34A7fqiAwiBBSBQOid7TLxwxVC27ymWQ==}
+    peerDependencies:
+      svelte: ^5.7.0
+
   runes-meta-tags@0.4.5:
     resolution: {integrity: sha512-4D6KmeW3cLzHepNUrM8Pgz6YrerQHDpZHGcHZ6PNczTB+GlFwZxYmmAxLF6JeH2zVh3p+vjYiDOfCN+c7MHiEw==}
     peerDependencies:
@@ -2143,6 +2151,11 @@ packages:
 
   svelte-rune-highlight@0.11.1:
     resolution: {integrity: sha512-edKVCqgv0U8JGm15sOhVrjczl+kw4W507SzfbFPVXqdLTWN/x0+6b6sXROE61f/8IR2ctKLhEE3KTyUequm+aw==}
+    peerDependencies:
+      svelte: ^5.0.0
+
+  svelte-sonner@1.1.0:
+    resolution: {integrity: sha512-3lYM6ZIqWe+p9vwwWHGWP/ZdvHiUtzURsud2quIxivrX4rvpXh6i+geBGn0m3JS6KwW6W8VgbOl3xQMcDuh6gg==}
     peerDependencies:
       svelte: ^5.0.0
 
@@ -4225,6 +4238,11 @@ snapshots:
     dependencies:
       svelte: 5.43.10
 
+  runed@0.28.0(svelte@5.43.10):
+    dependencies:
+      esm-env: 1.2.2
+      svelte: 5.43.10
+
   runes-meta-tags@0.4.5(svelte@5.43.10):
     dependencies:
       svelte: 5.43.10
@@ -4331,6 +4349,11 @@ snapshots:
   svelte-rune-highlight@0.11.1(svelte@5.43.10):
     dependencies:
       highlight.js: 11.11.1
+      svelte: 5.43.10
+
+  svelte-sonner@1.1.0(svelte@5.43.10):
+    dependencies:
+      runed: 0.28.0(svelte@5.43.10)
       svelte: 5.43.10
 
   svelte2tsx@0.7.45(svelte@5.43.10)(typescript@5.9.3):

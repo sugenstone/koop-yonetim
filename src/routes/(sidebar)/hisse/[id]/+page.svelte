@@ -52,6 +52,8 @@
   } from '$lib/tauri-api';
   import { hissedarLabel, hissedarLabelFromFields } from '$lib/hissedarFormat';
   import { exportPdf, formatTL, formatTarih } from '$lib/pdf';
+  import Can from '$lib/Can.svelte';
+  import { notify } from '$lib/toast';
 
   // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -164,9 +166,11 @@
       };
       await hisseAtamaApi.ata(input);
       atamaModalAcik = false;
+      notify.success('Hisse atandi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Atama hatası';
+      notify.apiError(e, 'Atama hatasi');
+      hata = e?.message ?? 'Atama hatasi';
     } finally {
       atamaKaydediliyor = false;
     }
@@ -187,9 +191,11 @@
       await hisseAtamaApi.sil(silinecekAtamaId);
       silModalAcik = false;
       silinecekAtamaId = null;
+      notify.success('Atama silindi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Silme hatası';
+      notify.apiError(e, 'Silme hatasi');
+      hata = e?.message ?? 'Silme hatasi';
     } finally {
       silKaydediliyor = false;
     }
@@ -230,9 +236,11 @@
       };
       await hisseAtamaApi.transfer(input);
       transferModalAcik = false;
+      notify.success('Hisse transfer edildi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Transfer hatası';
+      notify.apiError(e, 'Transfer hatasi');
+      hata = e?.message ?? 'Transfer hatasi';
     } finally {
       transferKaydediliyor = false;
     }
@@ -268,9 +276,11 @@
       };
       await hisseSatisApi.baslat(input);
       satisModalAcik = false;
+      notify.success('Satis baslatildi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Satış başlatma hatası';
+      notify.apiError(e, 'Satis baslatma hatasi');
+      hata = e?.message ?? 'Satis baslatma hatasi';
     } finally {
       satisKaydediliyor = false;
     }
@@ -307,9 +317,11 @@
       };
       await hisseSatisApi.odemeEkle(input);
       odemeModalAcik = false;
+      notify.success('Odeme eklendi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Ödeme ekleme hatası';
+      notify.apiError(e, 'Odeme ekleme hatasi');
+      hata = e?.message ?? 'Odeme ekleme hatasi';
     } finally {
       odemeKaydediliyor = false;
     }
@@ -320,9 +332,11 @@
     if (!confirm('Bu satış iptal edilecek. Devam etmek istiyor musunuz?')) return;
     try {
       await hisseSatisApi.iptal(aktifSatis.id);
+      notify.success('Satis iptal edildi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'İptal hatası';
+      notify.apiError(e, 'Iptal hatasi');
+      hata = e?.message ?? 'Iptal hatasi';
     }
   }
 
@@ -579,11 +593,15 @@
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <Button size="sm" color="primary" class="gap-2" onclick={odemeModalAc}>
-              <PlusOutline class="h-4 w-4" /> Ödeme Ekle
-            </Button>
+            <Can permission="hisse.satis">
+              <Button size="sm" color="primary" class="gap-2" onclick={odemeModalAc}>
+                <PlusOutline class="h-4 w-4" /> Ödeme Ekle
+              </Button>
+            </Can>
             {#if aktifSatis.odenen_tutar === 0}
-              <Button size="xs" color="alternative" onclick={satisiIptalEt}>İptal</Button>
+              <Can permission="hisse.satis">
+                <Button size="xs" color="alternative" onclick={satisiIptalEt}>İptal</Button>
+              </Can>
             {/if}
           </div>
         </div>
@@ -656,19 +674,25 @@
       </Heading>
       <div class="flex items-center gap-2">
         {#if hisse?.durum === 'atanmis' && !aktifSatis}
-          <Button size="sm" color="red" class="gap-2" onclick={satisModalAc}>
-            <MinusOutline class="h-4 w-4" /> Sisteme Sat
-          </Button>
+          <Can permission="hisse.satis">
+            <Button size="sm" color="red" class="gap-2" onclick={satisModalAc}>
+              <MinusOutline class="h-4 w-4" /> Sisteme Sat
+            </Button>
+          </Can>
         {/if}
         {#if mevcutSahip && !aktifSatis && hisse?.durum !== 'satildi'}
-          <Button size="sm" color="alternative" class="gap-2" onclick={transferAc}>
-            <UsersSolid class="h-4 w-4" /> Transfer Et
-          </Button>
+          <Can permission="hisse.transfer">
+            <Button size="sm" color="alternative" class="gap-2" onclick={transferAc}>
+              <UsersSolid class="h-4 w-4" /> Transfer Et
+            </Button>
+          </Can>
         {/if}
         {#if hisse?.durum === 'musait'}
-          <Button size="sm" color="primary" class="gap-2" onclick={atamaAc}>
-            <PlusOutline class="h-4 w-4" /> Hissedara Ata
-          </Button>
+          <Can permission="hisse.yonet">
+            <Button size="sm" color="primary" class="gap-2" onclick={atamaAc}>
+              <PlusOutline class="h-4 w-4" /> Hissedara Ata
+            </Button>
+          </Can>
         {/if}
       </div>
     </div>
@@ -718,13 +742,15 @@
           {/if}
           {#if visibleCols.has('islemler')}
             <TableBodyCell class="text-center">
-              <button
-                class="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-gray-700"
-                onclick={() => silAc(atama.id)}
-                title="Atamayı Sil"
-              >
-                <TrashBinSolid class="h-4 w-4" />
-              </button>
+              <Can permission="hisse.yonet">
+                <button
+                  class="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-gray-700"
+                  onclick={() => silAc(atama.id)}
+                  title="Atamayı Sil"
+                >
+                  <TrashBinSolid class="h-4 w-4" />
+                </button>
+              </Can>
             </TableBodyCell>
           {/if}
         </TableBodyRow>
@@ -733,9 +759,11 @@
         <div class="flex flex-col items-center justify-center py-6">
           <UsersSolid class="mb-3 h-10 w-10 text-gray-400" />
           <P class="text-gray-500 dark:text-gray-400">Bu hisse henüz hiç hissedara atanmamış</P>
-          <Button size="sm" class="mt-4 gap-2" onclick={atamaAc}>
-            <PlusOutline class="h-4 w-4" /> Hissedara Ata
-          </Button>
+          <Can permission="hisse.yonet">
+            <Button size="sm" class="mt-4 gap-2" onclick={atamaAc}>
+              <PlusOutline class="h-4 w-4" /> Hissedara Ata
+            </Button>
+          </Can>
         </div>
       {/snippet}
     </DataTable>

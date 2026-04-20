@@ -5,6 +5,7 @@
 };
 use sqlx::PgPool;
 use serde::{Deserialize, Serialize};
+use crate::auth::AuthUser;
 use crate::errors::AppResult;
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -56,7 +57,8 @@ pub fn router(pool: PgPool) -> Router {
         .with_state(pool)
 }
 
-async fn get_hissedarlar(State(pool): State<PgPool>) -> AppResult<Json<Vec<Hissedar>>> {
+async fn get_hissedarlar(user: AuthUser, State(pool): State<PgPool>) -> AppResult<Json<Vec<Hissedar>>> {
+    user.require_izin(&pool, "hissedar.goruntule").await?;
     let liste = sqlx::query_as::<_, Hissedar>(
         "SELECT h.id, h.ad, h.soyad, h.kasa_id, k.ad AS kasa_ad,
                 h.aile_sira_no, h.tcno, h.tel, h.yakin_adi, h.yakinlik_derecesi,
@@ -71,9 +73,11 @@ async fn get_hissedarlar(State(pool): State<PgPool>) -> AppResult<Json<Vec<Hisse
 }
 
 async fn get_hissedar(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Hissedar>> {
+    user.require_izin(&pool, "hissedar.goruntule").await?;
     let hissedar = sqlx::query_as::<_, Hissedar>(
         "SELECT h.id, h.ad, h.soyad, h.kasa_id, k.ad AS kasa_ad,
                 h.aile_sira_no, h.tcno, h.tel, h.yakin_adi, h.yakinlik_derecesi,
@@ -89,9 +93,11 @@ async fn get_hissedar(
 }
 
 async fn create_hissedar(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Json(input): Json<CreateHissedarInput>,
 ) -> AppResult<Json<Hissedar>> {
+    user.require_izin(&pool, "hissedar.olustur").await?;
     let hissedar = sqlx::query_as::<_, Hissedar>(
         "INSERT INTO hissedarlar (ad, soyad, kasa_id, aile_sira_no, tcno, tel, yakin_adi, yakinlik_derecesi)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -113,10 +119,12 @@ async fn create_hissedar(
 }
 
 async fn update_hissedar(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Path(id): Path<i64>,
     Json(input): Json<UpdateHissedarInput>,
 ) -> AppResult<Json<Hissedar>> {
+    user.require_izin(&pool, "hissedar.duzenle").await?;
     let hissedar = sqlx::query_as::<_, Hissedar>(
         "UPDATE hissedarlar SET
             ad                = COALESCE($1, ad),
@@ -150,9 +158,11 @@ async fn update_hissedar(
 }
 
 async fn delete_hissedar(
+    user: AuthUser,
     State(pool): State<PgPool>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
+    user.require_izin(&pool, "hissedar.sil").await?;
     sqlx::query("DELETE FROM hissedarlar WHERE id = $1")
         .bind(id)
         .execute(&pool)

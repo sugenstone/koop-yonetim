@@ -4,6 +4,7 @@ pub mod donem;
 pub mod hisse;
 pub mod gelir_gider;
 pub mod kullanici;
+pub mod izin;
 
 use axum::{middleware, Router, extract::Request, response::Response, middleware::Next};
 use sqlx::PgPool;
@@ -31,6 +32,7 @@ pub fn all_routes(pool: PgPool) -> Router {
         .nest("/donemler",     donem::router(pool.clone()))
         .nest("/hisseler",     hisse::router(pool.clone()))
         .nest("/gelir-gider",  gelir_gider::router(pool.clone()))
+        .nest("/izinler",      izin::router(pool.clone()))
         .layer(middleware::from_fn(require_auth));
 
     // Public: sadece giris

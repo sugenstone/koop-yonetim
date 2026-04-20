@@ -39,6 +39,8 @@
   import DataTable from '$lib/components/DataTable.svelte';
   import type { DataTableColumn } from '$lib/components/dataTableUtils';
   import { exportPdf, formatTarih } from '$lib/pdf';
+  import Can from '$lib/Can.svelte';
+  import { notify } from '$lib/toast';
 
   // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -100,9 +102,11 @@
       await kasaHareketiApi.delete({ id: silinecekId, kasa_id: kasaId });
       silModalAcik = false;
       silinecekId = null;
+      notify.success('Hareket silindi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Silme hatası';
+      notify.apiError(e, 'Silme hatasi');
+      hata = e?.message ?? 'Silme hatasi';
     } finally {
       kaydediliyor = false;
     }
@@ -163,9 +167,11 @@
       };
       await kasaTransferApi.create(input);
       trfModalAcik = false;
+      notify.success('Transfer yapildi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Transfer hatası';
+      notify.apiError(e, 'Transfer hatasi');
+      hata = e?.message ?? 'Transfer hatasi';
     } finally {
       trfKaydediliyor = false;
     }
@@ -320,9 +326,11 @@
         <Button size="sm" color="alternative" class="gap-2" onclick={pdfIndir}>
           <FileLinesSolid class="h-4 w-4" /> PDF
         </Button>
-        <Button size="sm" color="blue" class="gap-2" onclick={trfAc}>
-          <ArrowRightOutline class="h-4 w-4" /> Transfer
-        </Button>
+        <Can permission="kasa.transfer">
+          <Button size="sm" color="blue" class="gap-2" onclick={trfAc}>
+            <ArrowRightOutline class="h-4 w-4" /> Transfer
+          </Button>
+        </Can>
       </div>
     </div>
 
@@ -364,13 +372,15 @@
             {/if}
             {#if visibleCols.has('islemler')}
               <TableBodyCell class="text-center">
-                <button
-                  class="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-gray-700"
-                  onclick={() => silAc(h.id)}
-                  title="Sil"
-                >
-                  <TrashBinSolid class="h-4 w-4" />
-                </button>
+                <Can permission="kasa.hareket">
+                  <button
+                    class="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-gray-700"
+                    onclick={() => silAc(h.id)}
+                    title="Sil"
+                  >
+                    <TrashBinSolid class="h-4 w-4" />
+                  </button>
+                </Can>
               </TableBodyCell>
             {/if}
           </TableBodyRow>
@@ -378,9 +388,7 @@
         {#snippet empty()}
           <div class="flex flex-col items-center justify-center py-6">
             <P class="text-gray-500 dark:text-gray-400">Henüz hareket kaydı yok</P>
-            <Button size="sm" class="mt-4 gap-2" onclick={() => harAc('giren')}>
-              <PlusOutline class="h-4 w-4" /> İlk Hareketi Ekle
-            </Button>
+            <p class="mt-2 text-xs text-gray-400">Hareketler gelir/gider veya transfer ile oluşur.</p>
           </div>
         {/snippet}
       </DataTable>

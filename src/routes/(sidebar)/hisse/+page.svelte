@@ -36,6 +36,8 @@
   import DataTable from '$lib/components/DataTable.svelte';
   import type { DataTableColumn } from '$lib/components/dataTableUtils';
   import { exportPdf } from '$lib/pdf';
+  import Can from '$lib/Can.svelte';
+  import { notify } from '$lib/toast';
 
   // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -146,9 +148,11 @@
       };
       await hisseApi.create(input);
       tekModalAcik = false;
+      notify.success('Hisse olusturuldu');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Oluşturma hatası';
+      notify.apiError(e, 'Olusturma hatasi');
+      hata = e?.message ?? 'Olusturma hatasi';
     } finally {
       tekKaydediliyor = false;
     }
@@ -180,9 +184,11 @@
       };
       await hisseApi.createToplu(input);
       topluModalAcik = false;
+      notify.success(`${adet} hisse olusturuldu`);
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Toplu oluşturma hatası';
+      notify.apiError(e, 'Toplu olusturma hatasi');
+      hata = e?.message ?? 'Toplu olusturma hatasi';
     } finally {
       topluKaydediliyor = false;
     }
@@ -217,9 +223,11 @@
       };
       await hisseAtamaApi.ata(input);
       atamaModalAcik = false;
+      notify.success('Hisse atandi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Atama hatası';
+      notify.apiError(e, 'Atama hatasi');
+      hata = e?.message ?? 'Atama hatasi';
     } finally {
       atamaKaydediliyor = false;
     }
@@ -240,9 +248,11 @@
       await hisseApi.delete(silinecek.id);
       silModalAcik = false;
       silinecek = null;
+      notify.success('Hisse silindi');
       await yukle();
     } catch (e: any) {
-      hata = e?.toString() ?? 'Silme hatası';
+      notify.apiError(e, 'Silme hatasi');
+      hata = e?.message ?? 'Silme hatasi';
     } finally {
       silKaydediliyor = false;
     }
@@ -292,12 +302,16 @@
       <Button size="sm" color="alternative" class="gap-2" onclick={pdfIndir}>
         <FileLinesSolid class="h-4 w-4" /> PDF
       </Button>
-      <Button size="sm" color="light" class="gap-2" onclick={topluAc}>
-        <PlusOutline class="h-4 w-4" /> Toplu Oluştur
-      </Button>
-      <Button size="sm" color="primary" class="gap-2" onclick={tekAc}>
-        <PlusOutline class="h-4 w-4" /> Yeni Hisse
-      </Button>
+      <Can permission="hisse.yonet">
+        <Button size="sm" color="light" class="gap-2" onclick={topluAc}>
+          <PlusOutline class="h-4 w-4" /> Toplu Oluştur
+        </Button>
+      </Can>
+      <Can permission="hisse.yonet">
+        <Button size="sm" color="primary" class="gap-2" onclick={tekAc}>
+          <PlusOutline class="h-4 w-4" /> Yeni Hisse
+        </Button>
+      </Can>
     </div>
   </div>
 
@@ -367,13 +381,15 @@
             <TableBodyCell>
               <div class="flex items-center gap-1" onclick={(e) => e.stopPropagation()} role="presentation">
                 {#if hisse.durum === 'musait'}
-                  <button
-                    class="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 dark:bg-green-900/30 dark:text-green-400 dark:hover:bg-green-900/50"
-                    onclick={() => atamaAc(hisse)}
-                    title="Hissedara Ata"
-                  >
-                    <UsersSolid class="h-3.5 w-3.5" /> Ata
-                  </button>
+                  <Can permission="hisse.yonet">
+                    <button
+                      class="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 dark:bg-green-900/30 dark:text-green-400 dark:hover:bg-green-900/50"
+                      onclick={() => atamaAc(hisse)}
+                      title="Hissedara Ata"
+                    >
+                      <UsersSolid class="h-3.5 w-3.5" /> Ata
+                    </button>
+                  </Can>
                 {/if}
                 <button
                   class="rounded p-1.5 text-gray-400 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-gray-700"
@@ -383,13 +399,15 @@
                   <ArrowRightOutline class="h-4 w-4" />
                 </button>
                 {#if hisse.durum === 'musait'}
-                  <button
-                    class="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-gray-700"
-                    onclick={() => silAc(hisse)}
-                    title="Sil"
-                  >
-                    <TrashBinSolid class="h-4 w-4" />
-                  </button>
+                  <Can permission="hisse.yonet">
+                    <button
+                      class="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-gray-700"
+                      onclick={() => silAc(hisse)}
+                      title="Sil"
+                    >
+                      <TrashBinSolid class="h-4 w-4" />
+                    </button>
+                  </Can>
                 {/if}
               </div>
             </TableBodyCell>
@@ -401,8 +419,12 @@
           <LayersSolid class="mb-3 h-10 w-10 text-gray-400" />
           <P class="text-gray-500 dark:text-gray-400">Kayıt bulunamadı</P>
           <div class="mt-4 flex gap-2">
-            <Button size="sm" color="light" onclick={topluAc}>Toplu Oluştur</Button>
-            <Button size="sm" onclick={tekAc}>Yeni Hisse</Button>
+            <Can permission="hisse.yonet">
+              <Button size="sm" color="light" onclick={topluAc}>Toplu Oluştur</Button>
+            </Can>
+            <Can permission="hisse.yonet">
+              <Button size="sm" onclick={tekAc}>Yeni Hisse</Button>
+            </Can>
           </div>
         </div>
       {/snippet}

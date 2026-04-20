@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { invokeApi, setToken } from '$lib/api-client';
+	import { loadMyPermissions } from '$lib/permissions';
 	import { Button, Card, Input, Label, Alert } from 'flowbite-svelte';
 
 	let email = $state('admin@koop.local');
@@ -21,6 +22,7 @@
 			if (typeof localStorage !== 'undefined') {
 				localStorage.setItem('koop_kullanici', JSON.stringify(sonuc.kullanici));
 			}
+			await loadMyPermissions();
 			goto('/dashboard');
 		} catch (err: any) {
 			hata = err?.message || 'Giris basarisiz';
@@ -52,6 +54,13 @@
 			<Button type="submit" class="w-full" disabled={yukleniyor}>
 				{yukleniyor ? 'Giris yapiliyor...' : 'Giris Yap'}
 			</Button>
+
+			<p class="text-center text-sm text-gray-600 dark:text-gray-400">
+				Hesabiniz yok mu?
+				<a href="/authentication/sign-up" class="font-medium text-primary-600 hover:underline dark:text-primary-500">
+					Kayit olun
+				</a>
+			</p>
 		</form>
 	</Card>
 </main>

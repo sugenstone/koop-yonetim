@@ -3,6 +3,7 @@ mod models;
 mod routes;
 mod auth;
 mod errors;
+mod mail;
 
 use axum::{routing::get, Router, http::Method};
 use tower_http::cors::{CorsLayer, Any};
