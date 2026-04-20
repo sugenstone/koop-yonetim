@@ -97,6 +97,22 @@ pub fn token_dogrula(token: &str) -> Result<Claims, AppError> {
 
 pub struct AuthUser(pub Claims);
 
+impl AuthUser {
+    pub fn id(&self) -> i64 { self.0.sub }
+    pub fn rol(&self) -> &str { &self.0.rol }
+
+    /// Belirtilen rollerden birine sahip mi? Degilse Forbidden doner.
+    pub fn require_rol(&self, izin_verilen: &[&str]) -> AppResult<()> {
+        if izin_verilen.iter().any(|r| *r == self.0.rol) {
+            Ok(())
+        } else {
+            Err(AppError::Forbidden(format!(
+                "Bu islem icin yetkiniz yok (rol: {})", self.0.rol
+            )))
+        }
+    }
+}
+
 impl<S> FromRequestParts<S> for AuthUser
 where
     S: Send + Sync,

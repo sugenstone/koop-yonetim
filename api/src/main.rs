@@ -4,7 +4,7 @@ mod routes;
 mod auth;
 mod errors;
 
-use axum::{Router, http::Method};
+use axum::{routing::get, Router, http::Method};
 use tower_http::cors::{CorsLayer, Any};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use std::net::SocketAddr;
@@ -34,6 +34,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Router
     let app = Router::new()
+        .route("/health", get(|| async { "ok" }))
         .nest("/api", routes::all_routes(pool))
         .layer(cors);
 

@@ -30,3 +30,5 @@ api/target/
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+api/check_out.txt

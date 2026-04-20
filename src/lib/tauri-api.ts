@@ -1,9 +1,9 @@
 /**
- * Tauri backend ile iletişim için API helper'ları.
- * Rust komutlarını (invoke) çağırır ve SQLite verilerini döner.
+ * API helper'lari. REST API (Axum) uzerinden iletisim kurar.
+ * Tauri masaustu modunda da ayni REST endpoint'leri kullanir.
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeApi as invoke } from './api-client';
 
 // ─── Tip Tanımları ────────────────────────────────────────────────────────────
 

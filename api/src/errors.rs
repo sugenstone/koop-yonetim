@@ -10,6 +10,7 @@ pub enum AppError {
     NotFound(String),
     BadRequest(String),
     Unauthorized,
+    Forbidden(String),
     Internal(anyhow::Error),
     Database(sqlx::Error),
 }
@@ -20,6 +21,7 @@ impl IntoResponse for AppError {
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Yetkisiz erişim".to_string()),
+            AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
             AppError::Internal(e) => {
                 tracing::error!("Dahili hata: {:?}", e);
                 (StatusCode::INTERNAL_SERVER_ERROR, "Sunucu hatası".to_string())
