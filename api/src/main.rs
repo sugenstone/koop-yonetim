@@ -25,7 +25,13 @@ async fn main() -> anyhow::Result<()> {
 
     // Veritabanı bağlantısı
     let pool = db::create_pool().await?;
-    db::run_migrations(&pool).await?;
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        db::run_migrations(&pool),
+    ).await {
+        Ok(_) => {},
+        Err(_) => tracing::warn!("Migration timeout, sunucu başlatılıyor"),
+    }
 
     // CORS ayarları
     let cors = CorsLayer::new()

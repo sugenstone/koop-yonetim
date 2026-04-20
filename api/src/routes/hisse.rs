@@ -32,6 +32,45 @@ pub struct HisseAtama {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct HisseSatis {
+    pub id: i64,
+    pub hisse_id: i64,
+    pub hissedar_id: i64,
+    pub hissedar_adi: Option<String>,
+    pub kasa_id: i64,
+    pub satis_tutari: f64,
+    pub tarih: chrono::NaiveDate,
+    pub tamamlandi: bool,
+    pub tamamlanma_tarihi: Option<chrono::NaiveDate>,
+    pub iptal: bool,
+    pub aciklama: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct HisseSatisOdeme {
+    pub id: i64,
+    pub satis_id: i64,
+    pub tutar: f64,
+    pub tarih: chrono::NaiveDate,
+    pub aciklama: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct HisseBorc {
+    pub id: i64,
+    pub donem_id: i64,
+    pub hissedar_id: i64,
+    pub hisse_sayisi: i32,
+    pub tutar: f64,
+    pub odendi: bool,
+    pub odeme_tarihi: Option<chrono::NaiveDate>,
+    pub aciklama: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateHisseInput {
     pub aciklama: Option<String>,
@@ -45,9 +84,37 @@ pub struct CreateHisseTopluInput {
 
 #[derive(Debug, Deserialize)]
 pub struct AtamaInput {
+    pub hisse_id: i64,
     pub hissedar_id: i64,
     pub tarih: chrono::NaiveDate,
     pub ucret: f64,
+    pub aciklama: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TransferInput {
+    pub hisse_id: i64,
+    pub yeni_hissedar_id: i64,
+    pub tarih: chrono::NaiveDate,
+    pub ucret: f64,
+    pub aciklama: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SatisBaslatInput {
+    pub hisse_id: i64,
+    pub hissedar_id: i64,
+    pub kasa_id: i64,
+    pub satis_tutari: f64,
+    pub tarih: chrono::NaiveDate,
+    pub aciklama: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SatisOdemeInput {
+    pub satis_id: i64,
+    pub tutar: f64,
+    pub tarih: chrono::NaiveDate,
     pub aciklama: Option<String>,
 }
 
@@ -55,9 +122,17 @@ pub fn router(pool: PgPool) -> Router {
     Router::new()
         .route("/", get(get_hisseler).post(create_hisse))
         .route("/toplu", post(create_toplu))
+        .route("/ata", post(ata))
+        .route("/transfer", post(transfer))
+        .route("/satis", post(satis_baslat))
+        .route("/satis/{satis_id}", delete(satis_iptal))
+        .route("/satis/{satis_id}/odeme", post(satis_odeme_ekle))
+        .route("/satis/{satis_id}/odemeler", get(satis_odemeleri))
+        .route("/atama/{atama_id}", delete(atama_sil))
         .route("/{id}", get(get_hisse).delete(delete_hisse))
-        .route("/{id}/ata", post(ata))
         .route("/{id}/atamalar", get(get_atamalari))
+        .route("/{id}/borclar", get(get_hisse_borclari))
+        .route("/{id}/satis", get(get_hisse_satis_aktif))
         .with_state(pool)
 }
 
@@ -162,7 +237,6 @@ async fn create_toplu(
 async fn ata(
     user: AuthUser,
     State(pool): State<PgPool>,
-    Path(hisse_id): Path<i64>,
     Json(input): Json<AtamaInput>,
 ) -> AppResult<Json<HisseAtama>> {
     user.require_izin(&pool, "hisse.yonet").await?;
@@ -173,7 +247,7 @@ async fn ata(
                    (SELECT soyad || ' ' || ad FROM hissedarlar WHERE id = $2) AS hissedar_adi,
                    tarih, ucret, aciklama, created_at"
     )
-    .bind(hisse_id)
+    .bind(input.hisse_id)
     .bind(input.hissedar_id)
     .bind(input.tarih)
     .bind(input.ucret)
@@ -182,11 +256,190 @@ async fn ata(
     .await?;
 
     sqlx::query("UPDATE hisseler SET durum = 'atanmis', updated_at = NOW() WHERE id = $1")
-        .bind(hisse_id)
+        .bind(input.hisse_id)
         .execute(&pool)
         .await?;
 
     Ok(Json(atama))
+}
+
+async fn atama_sil(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(atama_id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    user.require_izin(&pool, "hisse.yonet").await?;
+    // Hisse'yi musait yap
+    sqlx::query(
+        "UPDATE hisseler SET durum = 'musait', updated_at = NOW()
+         WHERE id = (SELECT hisse_id FROM hisse_atamalari WHERE id = $1)"
+    )
+    .bind(atama_id)
+    .execute(&pool)
+    .await?;
+    sqlx::query("DELETE FROM hisse_atamalari WHERE id = $1")
+        .bind(atama_id)
+        .execute(&pool)
+        .await?;
+    Ok(Json(serde_json::json!({ "mesaj": "Atama silindi" })))
+}
+
+async fn transfer(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Json(input): Json<TransferInput>,
+) -> AppResult<Json<HisseAtama>> {
+    user.require_izin(&pool, "hisse.yonet").await?;
+    // Eski atamayı sil
+    sqlx::query("DELETE FROM hisse_atamalari WHERE hisse_id = $1")
+        .bind(input.hisse_id)
+        .execute(&pool)
+        .await?;
+    // Yeni atama ekle
+    let atama = sqlx::query_as::<_, HisseAtama>(
+        "INSERT INTO hisse_atamalari (hisse_id, hissedar_id, tarih, ucret, aciklama)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, hisse_id, hissedar_id,
+                   (SELECT soyad || ' ' || ad FROM hissedarlar WHERE id = $2) AS hissedar_adi,
+                   tarih, ucret, aciklama, created_at"
+    )
+    .bind(input.hisse_id)
+    .bind(input.yeni_hissedar_id)
+    .bind(input.tarih)
+    .bind(input.ucret)
+    .bind(input.aciklama)
+    .fetch_one(&pool)
+    .await?;
+    Ok(Json(atama))
+}
+
+async fn satis_baslat(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Json(input): Json<SatisBaslatInput>,
+) -> AppResult<Json<HisseSatis>> {
+    user.require_izin(&pool, "hisse.yonet").await?;
+    let satis = sqlx::query_as::<_, HisseSatis>(
+        "INSERT INTO hisse_satislari (hisse_id, hissedar_id, kasa_id, satis_tutari, tarih, aciklama)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, hisse_id, hissedar_id,
+                   (SELECT soyad || ' ' || ad FROM hissedarlar WHERE id = $2) AS hissedar_adi,
+                   kasa_id, satis_tutari, tarih, tamamlandi, tamamlanma_tarihi, iptal, aciklama, created_at"
+    )
+    .bind(input.hisse_id)
+    .bind(input.hissedar_id)
+    .bind(input.kasa_id)
+    .bind(input.satis_tutari)
+    .bind(input.tarih)
+    .bind(input.aciklama)
+    .fetch_one(&pool)
+    .await?;
+    Ok(Json(satis))
+}
+
+async fn satis_odeme_ekle(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(satis_id): Path<i64>,
+    Json(input): Json<SatisOdemeInput>,
+) -> AppResult<Json<HisseSatisOdeme>> {
+    user.require_izin(&pool, "hisse.yonet").await?;
+    let odeme = sqlx::query_as::<_, HisseSatisOdeme>(
+        "INSERT INTO hisse_satis_odemeleri (satis_id, tutar, tarih, aciklama)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, satis_id, tutar, tarih, aciklama, created_at"
+    )
+    .bind(satis_id)
+    .bind(input.tutar)
+    .bind(input.tarih)
+    .bind(input.aciklama)
+    .fetch_one(&pool)
+    .await?;
+    // Toplam ödeme = satış tutarı ise tamamlandı işaretle
+    sqlx::query(
+        "UPDATE hisse_satislari SET
+             tamamlandi = (SELECT COALESCE(SUM(tutar),0) FROM hisse_satis_odemeleri WHERE satis_id=$1) >= satis_tutari,
+             tamamlanma_tarihi = CASE WHEN (SELECT COALESCE(SUM(tutar),0) FROM hisse_satis_odemeleri WHERE satis_id=$1) >= satis_tutari THEN CURRENT_DATE ELSE NULL END
+         WHERE id = $1"
+    )
+    .bind(satis_id)
+    .execute(&pool)
+    .await?;
+    Ok(Json(odeme))
+}
+
+async fn satis_odemeleri(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(satis_id): Path<i64>,
+) -> AppResult<Json<Vec<HisseSatisOdeme>>> {
+    user.require_izin(&pool, "hisse.goruntule").await?;
+    let liste = sqlx::query_as::<_, HisseSatisOdeme>(
+        "SELECT id, satis_id, tutar, tarih, aciklama, created_at
+         FROM hisse_satis_odemeleri WHERE satis_id = $1 ORDER BY tarih"
+    )
+    .bind(satis_id)
+    .fetch_all(&pool)
+    .await?;
+    Ok(Json(liste))
+}
+
+async fn satis_iptal(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(satis_id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    user.require_izin(&pool, "hisse.yonet").await?;
+    sqlx::query("UPDATE hisse_satislari SET iptal = true WHERE id = $1")
+        .bind(satis_id)
+        .execute(&pool)
+        .await?;
+    Ok(Json(serde_json::json!({ "mesaj": "Satış iptal edildi" })))
+}
+
+async fn get_hisse_satis_aktif(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(hisse_id): Path<i64>,
+) -> AppResult<Json<Option<HisseSatis>>> {
+    user.require_izin(&pool, "hisse.goruntule").await?;
+    let satis = sqlx::query_as::<_, HisseSatis>(
+        "SELECT s.id, s.hisse_id, s.hissedar_id,
+                (h.soyad || ' ' || h.ad) AS hissedar_adi,
+                s.kasa_id, s.satis_tutari, s.tarih, s.tamamlandi,
+                s.tamamlanma_tarihi, s.iptal, s.aciklama, s.created_at
+         FROM hisse_satislari s
+         JOIN hissedarlar h ON h.id = s.hissedar_id
+         WHERE s.hisse_id = $1 AND s.iptal = false
+         ORDER BY s.created_at DESC LIMIT 1"
+    )
+    .bind(hisse_id)
+    .fetch_optional(&pool)
+    .await?;
+    Ok(Json(satis))
+}
+
+async fn get_hisse_borclari(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(hisse_id): Path<i64>,
+) -> AppResult<Json<Vec<HisseBorc>>> {
+    user.require_izin(&pool, "hisse.goruntule").await?;
+    // Hisseye atanmış hissedarın borçlarını getir
+    let liste = sqlx::query_as::<_, HisseBorc>(
+        "SELECT b.id, b.donem_id, b.hissedar_id, b.hisse_sayisi, b.tutar,
+                b.odendi, b.odeme_tarihi, b.aciklama, b.created_at
+         FROM donem_aidat_borclari b
+         WHERE b.hissedar_id = (
+             SELECT hissedar_id FROM hisse_atamalari
+             WHERE hisse_id = $1 ORDER BY tarih DESC LIMIT 1
+         )
+         ORDER BY b.created_at DESC"
+    )
+    .bind(hisse_id)
+    .fetch_all(&pool)
+    .await?;
+    Ok(Json(liste))
 }
 
 async fn get_atamalari(

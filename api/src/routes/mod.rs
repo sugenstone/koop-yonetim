@@ -30,6 +30,8 @@ pub fn all_routes(pool: PgPool) -> Router {
         .nest("/kasalar",      kasa::router(pool.clone()))
         .nest("/hissedarlar",  hissedar::router(pool.clone()))
         .nest("/donemler",     donem::router(pool.clone()))
+        .nest("/toplantilar",  donem::toplanti_router(pool.clone()))
+        .nest("/kararlar",     donem::karar_router(pool.clone()))
         .nest("/hisseler",     hisse::router(pool.clone()))
         .nest("/gelir-gider",  gelir_gider::router(pool.clone()))
         .nest("/izinler",      izin::router(pool.clone()))

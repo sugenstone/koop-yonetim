@@ -26,10 +26,75 @@ pub struct CreateDonemInput {
     pub hisse_basi_aidat: f64,
 }
 
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct Toplanti {
+    pub id: i64,
+    pub donem_id: i64,
+    pub tarih: chrono::NaiveDate,
+    pub konu: String,
+    pub yer: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateToplantiInput {
+    pub donem_id: i64,
+    pub tarih: chrono::NaiveDate,
+    pub konu: String,
+    pub yer: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct Karar {
+    pub id: i64,
+    pub toplanti_id: i64,
+    pub karar_no: Option<i32>,
+    pub aciklama: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateKararInput {
+    pub toplanti_id: i64,
+    pub karar_no: Option<i32>,
+    pub aciklama: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct AidatBorc {
+    pub id: i64,
+    pub donem_id: i64,
+    pub hissedar_id: i64,
+    pub hissedar_ad: Option<String>,
+    pub hisse_sayisi: i32,
+    pub tutar: f64,
+    pub odendi: bool,
+    pub odeme_tarihi: Option<chrono::NaiveDate>,
+    pub aciklama: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
 pub fn router(pool: PgPool) -> Router {
     Router::new()
         .route("/", get(get_donemler).post(create_donem))
         .route("/{id}", get(get_donem).put(update_donem).delete(delete_donem))
+        .route("/{id}/toplantilar", get(get_toplantilar).post(create_toplanti))
+        .route("/{id}/borclar", get(get_donem_borclari).post(donem_borc_olustur))
+        .with_state(pool)
+}
+
+/// Toplantı ve Karar route'ları (/api/toplantilar/*, /api/kararlar/*)
+pub fn toplanti_router(pool: PgPool) -> Router {
+    Router::new()
+        .route("/{id}", put(update_toplanti).delete(delete_toplanti))
+        .route("/{id}/kararlar", get(get_kararlar).post(create_karar))
+        .with_state(pool)
+}
+
+pub fn karar_router(pool: PgPool) -> Router {
+    Router::new()
+        .route("/{id}", put(update_karar).delete(delete_karar))
         .with_state(pool)
 }
 
@@ -106,6 +171,218 @@ async fn delete_donem(
         .bind(id)
         .execute(&pool)
         .await?;
-    Ok(Json(serde_json::json!({ "mesaj": "DÃ¶nem silindi" })))
+    Ok(Json(serde_json::json!({ "mesaj": "Dönem silindi" })))
 }
 
+// ─── Toplantı Handlers ──────────────────────────────────────────────────────
+
+async fn get_toplantilar(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Vec<Toplanti>>> {
+    user.require_izin(&pool, "donem.goruntule").await?;
+    let liste = sqlx::query_as::<_, Toplanti>(
+        "SELECT id, donem_id, tarih, konu, yer, created_at, updated_at
+         FROM toplantilar WHERE donem_id = $1 ORDER BY tarih DESC"
+    )
+    .bind(id)
+    .fetch_all(&pool)
+    .await?;
+    Ok(Json(liste))
+}
+
+async fn create_toplanti(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(donem_id): Path<i64>,
+    Json(input): Json<CreateToplantiInput>,
+) -> AppResult<Json<Toplanti>> {
+    user.require_izin(&pool, "toplanti.yonet").await?;
+    let toplanti = sqlx::query_as::<_, Toplanti>(
+        "INSERT INTO toplantilar (donem_id, tarih, konu, yer)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, donem_id, tarih, konu, yer, created_at, updated_at"
+    )
+    .bind(donem_id)
+    .bind(input.tarih)
+    .bind(input.konu)
+    .bind(input.yer)
+    .fetch_one(&pool)
+    .await?;
+    Ok(Json(toplanti))
+}
+
+async fn update_toplanti(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(id): Path<i64>,
+    Json(input): Json<CreateToplantiInput>,
+) -> AppResult<Json<Toplanti>> {
+    user.require_izin(&pool, "toplanti.yonet").await?;
+    let toplanti = sqlx::query_as::<_, Toplanti>(
+        "UPDATE toplantilar SET tarih=$1, konu=$2, yer=$3, updated_at=NOW()
+         WHERE id = $4
+         RETURNING id, donem_id, tarih, konu, yer, created_at, updated_at"
+    )
+    .bind(input.tarih)
+    .bind(input.konu)
+    .bind(input.yer)
+    .bind(id)
+    .fetch_one(&pool)
+    .await?;
+    Ok(Json(toplanti))
+}
+
+async fn delete_toplanti(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    user.require_izin(&pool, "toplanti.yonet").await?;
+    sqlx::query("DELETE FROM toplantilar WHERE id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await?;
+    Ok(Json(serde_json::json!({ "mesaj": "Toplantı silindi" })))
+}
+
+// ─── Karar Handlers ─────────────────────────────────────────────────────────
+
+async fn get_kararlar(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(toplanti_id): Path<i64>,
+) -> AppResult<Json<Vec<Karar>>> {
+    user.require_izin(&pool, "donem.goruntule").await?;
+    let liste = sqlx::query_as::<_, Karar>(
+        "SELECT id, toplanti_id, karar_no, aciklama, created_at
+         FROM kararlar WHERE toplanti_id = $1 ORDER BY karar_no ASC"
+    )
+    .bind(toplanti_id)
+    .fetch_all(&pool)
+    .await?;
+    Ok(Json(liste))
+}
+
+async fn create_karar(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(toplanti_id): Path<i64>,
+    Json(input): Json<CreateKararInput>,
+) -> AppResult<Json<Karar>> {
+    user.require_izin(&pool, "toplanti.yonet").await?;
+    let karar = sqlx::query_as::<_, Karar>(
+        "INSERT INTO kararlar (toplanti_id, karar_no, aciklama)
+         VALUES ($1, $2, $3)
+         RETURNING id, toplanti_id, karar_no, aciklama, created_at"
+    )
+    .bind(toplanti_id)
+    .bind(input.karar_no)
+    .bind(input.aciklama)
+    .fetch_one(&pool)
+    .await?;
+    Ok(Json(karar))
+}
+
+async fn update_karar(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(id): Path<i64>,
+    Json(input): Json<CreateKararInput>,
+) -> AppResult<Json<Karar>> {
+    user.require_izin(&pool, "toplanti.yonet").await?;
+    let karar = sqlx::query_as::<_, Karar>(
+        "UPDATE kararlar SET karar_no=$1, aciklama=$2
+         WHERE id = $3
+         RETURNING id, toplanti_id, karar_no, aciklama, created_at"
+    )
+    .bind(input.karar_no)
+    .bind(input.aciklama)
+    .bind(id)
+    .fetch_one(&pool)
+    .await?;
+    Ok(Json(karar))
+}
+
+async fn delete_karar(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    user.require_izin(&pool, "toplanti.yonet").await?;
+    sqlx::query("DELETE FROM kararlar WHERE id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await?;
+    Ok(Json(serde_json::json!({ "mesaj": "Karar silindi" })))
+}
+
+// ─── Aidat Borç Handlers ────────────────────────────────────────────────────
+
+async fn get_donem_borclari(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Vec<AidatBorc>>> {
+    user.require_izin(&pool, "donem.goruntule").await?;
+    let liste = sqlx::query_as::<_, AidatBorc>(
+        "SELECT b.id, b.donem_id, b.hissedar_id,
+                h.ad || ' ' || h.soyad AS hissedar_ad,
+                b.hisse_sayisi, b.tutar, b.odendi, b.odeme_tarihi, b.aciklama, b.created_at
+         FROM donem_aidat_borclari b
+         JOIN hissedarlar h ON h.id = b.hissedar_id
+         WHERE b.donem_id = $1
+         ORDER BY h.ad, h.soyad"
+    )
+    .bind(id)
+    .fetch_all(&pool)
+    .await?;
+    Ok(Json(liste))
+}
+
+async fn donem_borc_olustur(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(donem_id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    user.require_izin(&pool, "donem.yonet").await?;
+    // Dönemin aidat miktarını al
+    let donem = sqlx::query_as::<_, Donem>(
+        "SELECT id, ay, yil, hisse_basi_aidat, aktif, created_at, updated_at
+         FROM donemler WHERE id = $1"
+    )
+    .bind(donem_id)
+    .fetch_one(&pool)
+    .await?;
+
+    // Tüm aktif hissedarlar için borç oluştur (henüz borcu olmayanlar için)
+    let sonuc = sqlx::query(
+        "INSERT INTO donem_aidat_borclari (donem_id, hissedar_id, hisse_sayisi, tutar)
+         SELECT $1, h.id,
+                COALESCE((SELECT COUNT(*) FROM hisse_atamalari ha
+                          JOIN hisseler hs ON hs.id = ha.hisse_id
+                          WHERE ha.hissedar_id = h.id AND hs.durum = 'atanmis'), 1),
+                COALESCE((SELECT COUNT(*) FROM hisse_atamalari ha
+                          JOIN hisseler hs ON hs.id = ha.hisse_id
+                          WHERE ha.hissedar_id = h.id AND hs.durum = 'atanmis'), 1) * $2
+         FROM hissedarlar h
+         WHERE h.aktif = true
+           AND NOT EXISTS (
+               SELECT 1 FROM donem_aidat_borclari b
+               WHERE b.donem_id = $1 AND b.hissedar_id = h.id
+           )"
+    )
+    .bind(donem_id)
+    .bind(donem.hisse_basi_aidat)
+    .bind(donem_id)
+    .bind(donem.hisse_basi_aidat)
+    .execute(&pool)
+    .await?;
+    let eklenen = sonuc.rows_affected();
+
+    Ok(Json(serde_json::json!({
+        "mesaj": format!("{} hissedar için borç oluşturuldu", eklenen),
+        "eklenen": eklenen
+    })))
+}

@@ -14,7 +14,11 @@ pub async fn create_pool() -> anyhow::Result<PgPool> {
 }
 
 pub async fn run_migrations(pool: &PgPool) -> anyhow::Result<()> {
-    sqlx::migrate!("./migrations").run(pool).await?;
-    tracing::info!("Veritabanı migration'ları çalıştırıldı");
+    // Migration'lar VDS'de zaten uygulandı, advisory lock sorununu önlemek için
+    // sadece migrate!() yerine doğrudan çalıştır ama hataları yoksay
+    match sqlx::migrate!("./migrations").run(pool).await {
+        Ok(_) => tracing::info!("Migration'lar başarıyla çalıştırıldı"),
+        Err(e) => tracing::warn!("Migration atlandı: {}", e),
+    }
     Ok(())
 }
