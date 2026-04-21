@@ -134,6 +134,13 @@ const MAPPING: Record<string, EndpointMapping> = {
 	},
 	get_benim_izinlerim: { method: 'GET', path: () => '/api/izinler/benim' },
 
+	// ─── Admin ────────────────────────────────────────────────────────────
+	admin_sifirla: {
+		method: 'POST',
+		path: () => '/api/admin/sifirla',
+		body: (a) => ({ sifre: a.sifre })
+	},
+
 	// ─── Kasa ─────────────────────────────────────────────────────────────
 	get_kasalar: { method: 'GET', path: () => '/api/kasalar' },
 	get_kasa: { method: 'GET', path: (a) => `/api/kasalar/${a.id}` },

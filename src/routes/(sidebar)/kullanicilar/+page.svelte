@@ -19,7 +19,9 @@
     TrashBinSolid,
     LockSolid,
     UsersSolid,
-    ExclamationCircleSolid
+    ExclamationCircleSolid,
+    DatabaseSolid,
+    ArrowDownToBracketOutline
   } from 'flowbite-svelte-icons';
   import { goto } from '$app/navigation';
   import {
@@ -29,7 +31,7 @@
     type Kullanici,
     type KullaniciRol
   } from '$lib/tauri-api';
-  import { getCurrentUser, invokeApi } from '$lib/api-client';
+  import { getCurrentUser, invokeApi, getToken } from '$lib/api-client';
 
   // ─── Yetki Kontrolü ─────────────────────────────────────────────────────────
   const currentUser = getCurrentUser();
@@ -60,6 +62,13 @@
   let sifreModal = $state(false);
   let sifreHedef = $state<Kullanici | null>(null);
   let fYeniSifre = $state('');
+
+  // Yedekleme / Sıfırlama
+  let yedekModal = $state(false);
+  let sifirlaModal = $state(false);
+  let adminSifre = $state('');
+  let dbIslem = $state(false);
+  let dbMesaj = $state('');
 
   // Bekleyen basvurular
   type Bekleyen = {
@@ -234,6 +243,60 @@
     }
   }
 
+  // ─── Veritabanı Yedekle ─────────────────────────────────────────────────────
+  async function veritabaniYedekle() {
+    dbIslem = true;
+    dbMesaj = '';
+    try {
+      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+      const token = getToken();
+      const res = await fetch(`${apiBase}/api/admin/yedekle`, {
+        method: 'POST',
+        headers: {
+          Authorization: token ? `Bearer ${token}` : ''
+        }
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.hata ?? `HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get('content-disposition') ?? '';
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match ? match[1] : 'koop_yedek.sql';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      dbMesaj = `Yedek indirildi: ${filename}`;
+    } catch (e: any) {
+      dbMesaj = e.message ?? 'Yedekleme başarısız';
+    } finally {
+      dbIslem = false;
+    }
+  }
+
+  // ─── Veritabanı Sıfırla ──────────────────────────────────────────────────────
+  async function veritabaniSifirla(e: Event) {
+    e.preventDefault();
+    if (!adminSifre) return;
+    dbIslem = true;
+    dbMesaj = '';
+    try {
+      await invokeApi('admin_sifirla', { sifre: adminSifre });
+      sifirlaModal = false;
+      adminSifre = '';
+      dbMesaj = 'Veritabanı sıfırlandı. Tüm veriler silindi.';
+      await yukle();
+    } catch (e: any) {
+      dbMesaj = e.message ?? 'Sıfırlama başarısız';
+    } finally {
+      dbIslem = false;
+    }
+  }
+
   // ─── Badge rengi ────────────────────────────────────────────────────────────
   function rolRengi(rol: string): 'red' | 'yellow' | 'blue' | 'gray' {
     switch (rol) {
@@ -270,6 +333,32 @@
       </Button>
     {/if}
   </div>
+
+  <!-- Veritabanı İşlemleri (sadece admin) -->
+  {#if isAdmin}
+    <div class="mb-6 rounded-lg border border-orange-200 bg-orange-50 p-4 dark:border-orange-800 dark:bg-orange-900/20">
+      <div class="mb-3 flex items-center gap-2">
+        <DatabaseSolid class="h-5 w-5 text-orange-600 dark:text-orange-400" />
+        <span class="font-semibold text-orange-800 dark:text-orange-300">Veritabanı İşlemleri</span>
+        <Badge color="yellow">Admin</Badge>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <Button color="alternative" size="sm" onclick={veritabaniYedekle} disabled={dbIslem}>
+          <ArrowDownToBracketOutline class="me-2 h-4 w-4" />
+          {dbIslem ? 'İşleniyor...' : 'Veritabanı Yedekle'}
+        </Button>
+        <Button color="red" size="sm" onclick={() => { sifirlaModal = true; adminSifre = ''; dbMesaj = ''; }}>
+          <DatabaseSolid class="me-2 h-4 w-4" />
+          Veritabanı Sıfırla
+        </Button>
+      </div>
+      {#if dbMesaj}
+        <p class="mt-2 text-sm {dbMesaj.includes('başarısız') || dbMesaj.includes('hatalı') ? 'text-red-600 dark:text-red-400' : 'text-green-700 dark:text-green-400'}">
+          {dbMesaj}
+        </p>
+      {/if}
+    </div>
+  {/if}
 
   <!-- Rol Açıklama Kartı -->
   <div class="mb-6 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
@@ -474,6 +563,40 @@
         <Button color="alternative" onclick={() => (sifreModal = false)} type="button">İptal</Button>
         <Button color="primary" type="submit" disabled={kaydediliyor}>
           {kaydediliyor ? 'Kaydediliyor...' : 'Değiştir'}
+        </Button>
+      </div>
+    </form>
+  </Modal>
+
+  <!-- Veritabanı Sıfırla Modal -->
+  <Modal bind:open={sifirlaModal} size="sm" autoclose={false}>
+    <div class="text-center">
+      <ExclamationCircleSolid class="mx-auto mb-4 h-12 w-12 text-red-500" />
+      <h3 class="mb-2 text-lg font-bold text-red-600">Veritabanı Sıfırla</h3>
+      <P class="mb-4 text-sm text-gray-600 dark:text-gray-400">
+        Bu işlem <strong>geri alınamaz!</strong> Tüm hissedarlar, dönemler, kasalar,
+        hisseler ve işlemler silinir. Kullanıcı hesapları korunur.
+      </P>
+    </div>
+    <form onsubmit={veritabaniSifirla} class="space-y-4">
+      <Label>
+        Onaylamak için admin şifrenizi girin:
+        <Input
+          type="password"
+          bind:value={adminSifre}
+          required
+          placeholder="Şifreniz"
+          class="mt-1"
+          autofocus
+        />
+      </Label>
+      {#if dbMesaj && (dbMesaj.includes('hatalı') || dbMesaj.includes('başarısız'))}
+        <p class="text-sm text-red-600">{dbMesaj}</p>
+      {/if}
+      <div class="flex justify-end gap-2 pt-2">
+        <Button color="alternative" onclick={() => (sifirlaModal = false)} type="button">Vazgeç</Button>
+        <Button color="red" type="submit" disabled={dbIslem || !adminSifre}>
+          {dbIslem ? 'Sıfırlanıyor...' : 'Evet, Tüm Verileri Sil'}
         </Button>
       </div>
     </form>

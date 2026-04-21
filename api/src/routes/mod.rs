@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod common;
 pub mod kasa;
 pub mod hissedar;
@@ -36,6 +37,7 @@ pub fn all_routes(pool: PgPool) -> Router {
         .nest("/hisseler",     hisse::router(pool.clone()))
         .nest("/gelir-gider",  gelir_gider::router(pool.clone()))
         .nest("/izinler",      izin::router(pool.clone()))
+        .nest("/admin",        admin::router(pool.clone()))
         .layer(middleware::from_fn(require_auth));
 
     // Public: sadece giris
