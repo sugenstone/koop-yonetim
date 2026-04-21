@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::auth::AuthUser;
 use crate::errors::AppResult;
 use super::common::{
-    ata_hisse_tam, cuzdan_alacak_ekle, cuzdan_borc_ekle, cuzdan_son_bakiye, hissedar_bilgi,
+    ata_hisse_tam, ata_hisseler_toplu_tam, cuzdan_alacak_ekle, cuzdan_borc_ekle, cuzdan_son_bakiye, hissedar_bilgi,
     kasa_cikan_ekle, kasa_giren_ekle, kasa_son_bakiye,
 };
 
@@ -272,14 +272,15 @@ async fn create_toplu(
         hisseler.push(h);
     }
 
-    // Hissedar seçildiyse tüm oluşturulan hisseleri ata (cüzdan + kasa + retroaktif)
+    // Hissedar seçildiyse tüm oluşturulan hisseleri TEK toplu çağrı ile ata
+    // (cüzdanda tek satır, kasada tek satır, her dönem için tek konsolide borç)
     if let Some(hissedar_id) = input.atama_hissedar_id {
         let tarih = input.atama_tarih.unwrap_or_else(|| chrono::Utc::now().date_naive());
         let ucret = input.atama_ucret.unwrap_or(0.0);
-        for hid in &olusturulan_idler {
-            ata_hisse_tam(&pool, *hid, hissedar_id, tarih, ucret, input.atama_aciklama.as_deref())
-                .await?;
-        }
+        ata_hisseler_toplu_tam(
+            &pool, &olusturulan_idler, hissedar_id, tarih, ucret,
+            input.atama_aciklama.as_deref(),
+        ).await?;
         // Güncel bilgilerle tekrar çek
         let guncel = sqlx::query_as::<_, Hisse>(
             "SELECT h.id, h.kod, h.durum, h.aciklama,

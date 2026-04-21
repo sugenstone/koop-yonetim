@@ -203,18 +203,24 @@ pub async fn hissedar_bilgi(pool: &PgPool, hissedar_id: i64) -> sqlx::Result<His
     .await
 }
 
-// ─── Retroaktif Dönem Borçları ─────────────────────────────────────────────
+// ─── Retroaktif Dönem Borçları (KONSOLİDE) ─────────────────────────────────
 
 /// Yeni atanan hissedara geçmiş tüm dönemler için borç oluşturur (güncel tarife ile).
-/// Tauri'deki ata_hisse_conn içindeki retroaktif mantığın PostgreSQL karşılığı.
-///
-/// `hisse_kod` aktif yeni atanan hisse kodu (bilgi metinlerinde kullanılır).
-pub async fn retroaktif_donem_borclari(
+/// `adet` kadar hisse için tek kayıt — cüzdanda her dönem için TEK satır,
+/// donem_aidat_borclari'nda her dönem için TEK konsolide satır.
+/// Tauri'deki ata_hisseler_toplu_conn ile birebir aynı mantık.
+/// Retroaktif borçlar `odenmemiş` olarak kalır; manuel tahsilat bekler.
+pub async fn retroaktif_donem_borclari_toplu(
     pool: &PgPool,
     hissedar_id: i64,
-    hisse_kod: &str,
+    adet: i64,
+    _kodlar_str: &str,
 ) -> sqlx::Result<u64> {
-    // En güncel dönemin aidat tutarı (adalet gereği tüm geçmiş dönemler bu tarife)
+    if adet <= 0 {
+        return Ok(0);
+    }
+
+    // En güncel dönem tarifesi (adalet gereği tüm geçmiş dönemler bu tarife)
     let aidat: Option<f64> = sqlx::query_scalar(
         "SELECT hisse_basi_aidat FROM donemler
          ORDER BY yil DESC, ay DESC LIMIT 1",
@@ -238,12 +244,13 @@ pub async fn retroaktif_donem_borclari(
     .await?;
 
     let tarih = chrono::Utc::now().date_naive();
+    let donem_toplam_tutar = aidat_tutari * adet as f64;
     let mut eklenen: u64 = 0;
 
     for donem in &donemler {
         let donem_ad = donem_adi(donem.ay, donem.yil);
 
-        // Bu dönem + hissedar için mevcut ödenmemiş borç
+        // Bu dönem + hissedar için ödenmemiş borç var mı?
         #[derive(sqlx::FromRow)]
         struct Mevcut { id: i64, tutar: f64, hisse_sayisi: i32 }
         let mevcut: Option<Mevcut> = sqlx::query_as(
@@ -256,13 +263,10 @@ pub async fn retroaktif_donem_borclari(
         .fetch_optional(pool)
         .await?;
 
-        let cuzdan_onceki = cuzdan_son_bakiye(pool, hissedar_id).await?;
-
         if let Some(m) = mevcut {
-            // Var olan borcu güncelle (+1 hisse, +aidat_tutari)
-            let yeni_tutar = m.tutar + aidat_tutari;
-            let yeni_hs = m.hisse_sayisi + 1;
-            let yeterli = cuzdan_onceki >= yeni_tutar;
+            // Güncelle: mevcut + adet kadar ekleme
+            let yeni_tutar = m.tutar + donem_toplam_tutar;
+            let yeni_hs = m.hisse_sayisi + adet as i32;
             let borc_aciklama = format!(
                 "{} aidatı - {} hisse ({} {}) [Geçmiş dönem - güncel tarife]",
                 donem_ad, yeni_hs, h.ad, h.soyad
@@ -270,76 +274,128 @@ pub async fn retroaktif_donem_borclari(
 
             sqlx::query(
                 "UPDATE donem_aidat_borclari
-                 SET tutar=$1, hisse_sayisi=$2, aciklama=$3, odendi=$4, odeme_tarihi=$5
-                 WHERE id=$6",
+                 SET tutar=$1, hisse_sayisi=$2, aciklama=$3
+                 WHERE id=$4",
             )
             .bind(yeni_tutar)
             .bind(yeni_hs)
             .bind(&borc_aciklama)
-            .bind(yeterli)
-            .bind(if yeterli { Some(tarih) } else { None })
             .bind(m.id)
             .execute(pool)
             .await?;
-
-            // Cüzdana delta borç (sadece yeni hisse kadar)
-            let bilgi_borc = format!("{} aidatı - {} [geçmiş dönem]", donem_ad, hisse_kod);
-            cuzdan_borc_ekle(pool, hissedar_id, Some(donem.id), tarih, &bilgi_borc, aidat_tutari).await?;
-
-            if yeterli {
-                // Otomatik tahsilat: tam tutarı kasaya aktar + cüzdanda mahsup et
-                let kasa_ac = tahsilat_aciklamasi(
-                    &donem_ad, yeni_hs as i64, &h.ad, &h.soyad, &h.yakin_adi, &h.yakinlik_derecesi
-                );
-                kasa_giren_ekle(pool, h.kasa_id, tarih, &kasa_ac, yeni_tutar).await?;
-                let tahsil_bilgi = format!("Tahsilat: {} - {} hisse", donem_ad, yeni_hs);
-                cuzdan_alacak_ekle(pool, hissedar_id, Some(donem.id), tarih, &tahsil_bilgi, yeni_tutar).await?;
-            }
         } else {
-            // Yeni borç kaydı
-            let yeterli = cuzdan_onceki >= aidat_tutari;
+            // Yeni kayıt (ödenmemiş; Tauri ile aynı mantık)
             let borc_aciklama = format!(
-                "{} aidatı - 1 hisse ({} {}) [Geçmiş dönem - güncel tarife]",
-                donem_ad, h.ad, h.soyad
+                "{} aidatı - {} hisse ({} {}) [Geçmiş dönem - güncel tarife]",
+                donem_ad, adet, h.ad, h.soyad
             );
             sqlx::query(
                 "INSERT INTO donem_aidat_borclari
                      (donem_id, hissedar_id, hisse_sayisi, tutar, odendi, odeme_tarihi, aciklama)
-                 VALUES ($1, $2, 1, $3, $4, $5, $6)",
+                 VALUES ($1, $2, $3, $4, false, NULL, $5)",
             )
             .bind(donem.id)
             .bind(hissedar_id)
-            .bind(aidat_tutari)
-            .bind(yeterli)
-            .bind(if yeterli { Some(tarih) } else { None })
+            .bind(adet as i32)
+            .bind(donem_toplam_tutar)
             .bind(&borc_aciklama)
             .execute(pool)
             .await?;
-
-            let bilgi_borc = format!("{} aidatı - {} [geçmiş dönem]", donem_ad, hisse_kod);
-            cuzdan_borc_ekle(pool, hissedar_id, Some(donem.id), tarih, &bilgi_borc, aidat_tutari).await?;
-
-            if yeterli {
-                let kasa_ac = tahsilat_aciklamasi(
-                    &donem_ad, 1, &h.ad, &h.soyad, &h.yakin_adi, &h.yakinlik_derecesi
-                );
-                kasa_giren_ekle(pool, h.kasa_id, tarih, &kasa_ac, aidat_tutari).await?;
-                let tahsil_bilgi = format!("Tahsilat: {} - 1 hisse", donem_ad);
-                cuzdan_alacak_ekle(pool, hissedar_id, Some(donem.id), tarih, &tahsil_bilgi, aidat_tutari).await?;
-            }
             eklenen += 1;
         }
+
+        // Cüzdana TEK konsolide borç kaydı (adet hisse)
+        let cuzdan_borc_bilgi = format!("{} aidatı - {} hisse [geçmiş dönem]", donem_ad, adet);
+        cuzdan_borc_ekle(pool, hissedar_id, Some(donem.id), tarih, &cuzdan_borc_bilgi, donem_toplam_tutar).await?;
     }
 
     Ok(eklenen)
 }
 
-// ─── Tam Hisse Atama (kasa + cüzdan + retroaktif) ──────────────────────────
+// ─── Tam Hisse Atama - TOPLU (kasa + cüzdan + retroaktif, KONSOLİDE) ───────
 
-/// Bir hisseyi hissedara atar ve Tauri ata_hisse_conn ile birebir mantıkta
-/// cüzdan/kasa/retroaktif kayıtlarını oluşturur.
+/// Birden çok hisseyi aynı hissedara TEK seferde atar; cüzdan/kasa/dönem
+/// kayıtları konsolide (tek satır) oluşturulur. Tauri'deki
+/// ata_hisseler_toplu_conn ile birebir aynı mantık.
 ///
-/// Ön koşul: hisse 'musait' durumda olmalı.
+/// Döndürdüğü: oluşturulan atama id'leri (hisse_idler ile aynı sırada).
+pub async fn ata_hisseler_toplu_tam(
+    pool: &PgPool,
+    hisse_idler: &[i64],
+    hissedar_id: i64,
+    tarih: chrono::NaiveDate,
+    ucret_per_hisse: f64,
+    aciklama: Option<&str>,
+) -> anyhow::Result<Vec<i64>> {
+    if hisse_idler.is_empty() {
+        return Ok(Vec::new());
+    }
+    if ucret_per_hisse < 0.0 {
+        anyhow::bail!("Ücret negatif olamaz");
+    }
+
+    let adet = hisse_idler.len() as i64;
+    let toplam_ucret = ucret_per_hisse * adet as f64;
+
+    let h = hissedar_bilgi(pool, hissedar_id).await?;
+
+    // Hisse kodlarını topla + her hisse için atama ve durum güncelle
+    let mut atama_idler: Vec<i64> = Vec::with_capacity(hisse_idler.len());
+    let mut hisse_kodlari: Vec<String> = Vec::with_capacity(hisse_idler.len());
+
+    for &hid in hisse_idler {
+        let kod: String = sqlx::query_scalar("SELECT kod FROM hisseler WHERE id = $1")
+            .bind(hid)
+            .fetch_one(pool)
+            .await?;
+        hisse_kodlari.push(kod);
+
+        let aid: i64 = sqlx::query_scalar(
+            "INSERT INTO hisse_atamalari (hisse_id, hissedar_id, tarih, ucret, aciklama)
+             VALUES ($1, $2, $3, $4, $5) RETURNING id",
+        )
+        .bind(hid)
+        .bind(hissedar_id)
+        .bind(tarih)
+        .bind(ucret_per_hisse)
+        .bind(aciklama)
+        .fetch_one(pool)
+        .await?;
+        atama_idler.push(aid);
+
+        sqlx::query("UPDATE hisseler SET durum = 'atanmis', updated_at = NOW() WHERE id = $1")
+            .bind(hid)
+            .execute(pool)
+            .await?;
+    }
+
+    let kodlar_str = hisse_kodlari.join(", ");
+
+    // ── Ücret varsa: TEK konsolide cüzdan borç + (yeterliyse) TEK kasa giren ─
+    if toplam_ucret > 0.0 {
+        let onceki_cuzdan = cuzdan_son_bakiye(pool, hissedar_id).await?;
+        let cuzdan_bilgi = format!("Hisse satın alma: {} ({} hisse)", kodlar_str, adet);
+        cuzdan_borc_ekle(pool, hissedar_id, None, tarih, &cuzdan_bilgi, toplam_ucret).await?;
+
+        if onceki_cuzdan >= toplam_ucret {
+            let kasa_ac = format!(
+                "Hisse satın alma tahsilatı: {} ({} hisse) - {} {}",
+                kodlar_str, adet, h.ad, h.soyad
+            );
+            kasa_giren_ekle(pool, h.kasa_id, tarih, &kasa_ac, toplam_ucret).await?;
+        }
+    }
+
+    // ── Retroaktif dönem borçları (her dönem için TEK konsolide kayıt) ─────
+    retroaktif_donem_borclari_toplu(pool, hissedar_id, adet, &kodlar_str).await?;
+
+    Ok(atama_idler)
+}
+
+// ─── Tek Hisse Atama wrapper ───────────────────────────────────────────────
+
+/// Tek bir hisseyi atamak için `ata_hisseler_toplu_tam` wrapper'ı.
+/// Döner: oluşturulan atama id.
 pub async fn ata_hisse_tam(
     pool: &PgPool,
     hisse_id: i64,
@@ -348,52 +404,7 @@ pub async fn ata_hisse_tam(
     ucret: f64,
     aciklama: Option<&str>,
 ) -> anyhow::Result<i64> {
-    if ucret < 0.0 {
-        anyhow::bail!("Ücret negatif olamaz");
-    }
-
-    let hisse_kod: String = sqlx::query_scalar("SELECT kod FROM hisseler WHERE id = $1")
-        .bind(hisse_id)
-        .fetch_one(pool)
-        .await?;
-
-    let h = hissedar_bilgi(pool, hissedar_id).await?;
-
-    // Atama kaydı
-    let atama_id: i64 = sqlx::query_scalar(
-        "INSERT INTO hisse_atamalari (hisse_id, hissedar_id, tarih, ucret, aciklama)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id",
-    )
-    .bind(hisse_id)
-    .bind(hissedar_id)
-    .bind(tarih)
-    .bind(ucret)
-    .bind(aciklama)
-    .fetch_one(pool)
-    .await?;
-
-    sqlx::query("UPDATE hisseler SET durum = 'atanmis', updated_at = NOW() WHERE id = $1")
-        .bind(hisse_id)
-        .execute(pool)
-        .await?;
-
-    // Ücret > 0 → cüzdan borç + (bakiye yeterliyse kasa giren)
-    if ucret > 0.0 {
-        let onceki = cuzdan_son_bakiye(pool, hissedar_id).await?;
-        let bilgi = format!("Hisse satın alma: {}", hisse_kod);
-        cuzdan_borc_ekle(pool, hissedar_id, None, tarih, &bilgi, ucret).await?;
-
-        if onceki >= ucret {
-            let kasa_ac = format!(
-                "Hisse satın alma tahsilatı: {} - {} {}",
-                hisse_kod, h.ad, h.soyad
-            );
-            kasa_giren_ekle(pool, h.kasa_id, tarih, &kasa_ac, ucret).await?;
-        }
-    }
-
-    // Retroaktif dönem borçları
-    retroaktif_donem_borclari(pool, hissedar_id, &hisse_kod).await?;
-
-    Ok(atama_id)
+    let idler = ata_hisseler_toplu_tam(pool, &[hisse_id], hissedar_id, tarih, ucret, aciklama).await?;
+    idler.into_iter().next().ok_or_else(|| anyhow::anyhow!("Atama oluşturulamadı"))
 }
+
