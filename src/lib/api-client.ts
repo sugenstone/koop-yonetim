@@ -141,6 +141,23 @@ const MAPPING: Record<string, EndpointMapping> = {
 		body: (a) => ({ sifre: a.sifre })
 	},
 
+	// ─── İşlem Logları (Audit) ────────────────────────────────────────────
+	get_loglar: {
+		method: 'GET',
+		path: (a) => {
+			const qs = new URLSearchParams();
+			if (a?.limit != null) qs.set('limit', String(a.limit));
+			if (a?.offset != null) qs.set('offset', String(a.offset));
+			if (a?.kullanici_id != null) qs.set('kullanici_id', String(a.kullanici_id));
+			if (a?.yontem) qs.set('yontem', a.yontem);
+			if (a?.min_durum != null) qs.set('min_durum', String(a.min_durum));
+			if (a?.q) qs.set('q', a.q);
+			const s = qs.toString();
+			return s ? `/api/loglar?${s}` : '/api/loglar';
+		}
+	},
+	get_log_ozet: { method: 'GET', path: () => '/api/loglar/ozet' },
+
 	// ─── Kasa ─────────────────────────────────────────────────────────────
 	get_kasalar: { method: 'GET', path: () => '/api/kasalar' },
 	get_kasa: { method: 'GET', path: (a) => `/api/kasalar/${a.id}` },

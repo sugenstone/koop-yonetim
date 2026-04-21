@@ -248,9 +248,8 @@
     dbIslem = true;
     dbMesaj = '';
     try {
-      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
       const token = getToken();
-      const res = await fetch(`${apiBase}/api/admin/yedekle`, {
+      const res = await fetch(`/api/admin/yedekle`, {
         method: 'POST',
         headers: {
           Authorization: token ? `Bearer ${token}` : ''

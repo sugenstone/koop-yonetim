@@ -204,21 +204,11 @@ async fn create_hareket(
     Json(input): Json<CreateHareket>,
 ) -> AppResult<Json<KasaHareketi>> {
     user.require_izin(&pool, "kasa.hareket").await?;
-    let son_bakiye: f64 = sqlx::query_scalar::<_, Option<f64>>(
-        "SELECT bakiye FROM kasa_hareketleri
-         WHERE kasa_id = $1 ORDER BY tarih DESC, id DESC LIMIT 1",
-    )
-    .bind(input.kasa_id)
-    .fetch_optional(&pool)
-    .await?
-    .flatten()
-    .unwrap_or(0.0);
 
-    let yeni_bakiye = son_bakiye + input.giren - input.cikan;
-
+    // Gecici bakiye 0 ile ekle; asagidaki recompute dogru degere sabitler
     let hareket = sqlx::query_as::<_, KasaHareketi>(
         "INSERT INTO kasa_hareketleri (kasa_id, tarih, aciklama, giren, cikan, bakiye)
-         VALUES ($1, $2, $3, $4, $5, $6)
+         VALUES ($1, $2, $3, $4, $5, 0.0)
          RETURNING id, kasa_id, tarih, aciklama, giren, cikan, bakiye, created_at",
     )
     .bind(input.kasa_id)
@@ -226,15 +216,20 @@ async fn create_hareket(
     .bind(input.aciklama)
     .bind(input.giren)
     .bind(input.cikan)
-    .bind(yeni_bakiye)
     .fetch_one(&pool)
     .await?;
 
-    sqlx::query("UPDATE kasalar SET bakiye = $1, updated_at = NOW() WHERE id = $2")
-        .bind(yeni_bakiye)
-        .bind(input.kasa_id)
-        .execute(&pool)
-        .await?;
+    // Kronolojik sirayla tum hareketlerin bakiyesini yeniden hesapla
+    crate::routes::common::recompute_kasa_bakiyeleri(&pool, input.kasa_id).await?;
+
+    // Guncel satiri geri oku (bakiye dogru olsun)
+    let hareket = sqlx::query_as::<_, KasaHareketi>(
+        "SELECT id, kasa_id, tarih, aciklama, giren, cikan, bakiye, created_at
+         FROM kasa_hareketleri WHERE id = $1",
+    )
+    .bind(hareket.id)
+    .fetch_one(&pool)
+    .await?;
 
     Ok(Json(hareket))
 }
@@ -245,11 +240,34 @@ async fn delete_hareket(
     Path((kasa_id, hareket_id)): Path<(i64, i64)>,
 ) -> AppResult<Json<serde_json::Value>> {
     user.require_izin(&pool, "kasa.hareket").await?;
-    sqlx::query("DELETE FROM kasa_hareketleri WHERE id = $1 AND kasa_id = $2")
-        .bind(hareket_id)
-        .bind(kasa_id)
-        .execute(&pool)
-        .await?;
+
+    let mut tx = pool.begin().await?;
+
+    // Hareket bir gelir_gider kaydina bagli ise, once kaydi cozulmeli
+    sqlx::query(
+        "UPDATE gelir_gider_kayitlari SET kasa_hareketi_id = NULL
+          WHERE kasa_hareketi_id = $1"
+    )
+    .bind(hareket_id)
+    .execute(&mut *tx)
+    .await?;
+
+    let silindi = sqlx::query(
+        "DELETE FROM kasa_hareketleri WHERE id = $1 AND kasa_id = $2"
+    )
+    .bind(hareket_id)
+    .bind(kasa_id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+
+    tx.commit().await?;
+
+    if silindi > 0 {
+        // Kalan hareketlerin bakiyesini ve kasalar.bakiye'yi yeniden hesapla
+        crate::routes::common::recompute_kasa_bakiyeleri(&pool, kasa_id).await?;
+    }
+
     Ok(Json(serde_json::json!({ "mesaj": "Hareket silindi" })))
 }
 
@@ -298,16 +316,16 @@ async fn kasa_transfer(
 
     let mut tx = pool.begin().await?;
 
-    // Kaynak + hedef kasa bilgisi
-    let (kaynak_bakiye, kaynak_para_birimi): (f64, String) = sqlx::query_as(
-        "SELECT bakiye, para_birimi FROM kasalar WHERE id = $1",
+    // Kaynak + hedef kasa bilgisi (ad dahil - aciklama icin gerekli)
+    let (kaynak_bakiye, kaynak_para_birimi, kaynak_ad): (f64, String, String) = sqlx::query_as(
+        "SELECT bakiye, para_birimi, ad FROM kasalar WHERE id = $1",
     )
     .bind(input.kaynak_kasa_id)
     .fetch_one(&mut *tx)
     .await?;
 
-    let (_hedef_bakiye, hedef_para_birimi): (f64, String) = sqlx::query_as(
-        "SELECT bakiye, para_birimi FROM kasalar WHERE id = $1",
+    let (_hedef_bakiye, hedef_para_birimi, hedef_ad): (f64, String, String) = sqlx::query_as(
+        "SELECT bakiye, para_birimi, ad FROM kasalar WHERE id = $1",
     )
     .bind(input.hedef_kasa_id)
     .fetch_one(&mut *tx)
@@ -342,6 +360,31 @@ async fn kasa_transfer(
         .clone()
         .unwrap_or_else(|| "Transfer".to_string());
 
+    // Ortak aciklama notu (kullanici yazdiysa)
+    let not = if hedef_aciklama == "Transfer" {
+        String::new()
+    } else {
+        format!(" [{}]", hedef_aciklama)
+    };
+
+    // Seffaf donusum metni: farkli birimlerde kur dahil, ayni birimlerde sade.
+    let donusum_str = if kaynak_para_birimi == hedef_para_birimi {
+        format!(
+            "{:.2} {}",
+            input.hedef_miktar, hedef_para_birimi
+        )
+    } else {
+        // input.kur: 1 hedef_pb = kur kaynak_pb
+        format!(
+            "{:.2} {} \u{00d7} {:.4} = {:.2} {}",
+            input.hedef_miktar,
+            hedef_para_birimi,
+            input.kur.unwrap_or(0.0),
+            kaynak_miktar,
+            kaynak_para_birimi
+        )
+    };
+
     // Kaynak hareket
     let kaynak_son_bakiye: f64 = sqlx::query_scalar::<_, Option<f64>>(
         "SELECT bakiye FROM kasa_hareketleri
@@ -353,7 +396,7 @@ async fn kasa_transfer(
     .flatten()
     .unwrap_or(0.0);
     let kaynak_yeni_bakiye = kaynak_son_bakiye - kaynak_miktar;
-    let kaynak_aciklama = format!("Transfer -> {} [{}]", hedef_para_birimi, hedef_aciklama);
+    let kaynak_aciklama = format!("Transfer \u{2192} {}: {}{}", hedef_ad, donusum_str, not);
 
     sqlx::query(
         "INSERT INTO kasa_hareketleri (kasa_id, tarih, aciklama, giren, cikan, bakiye)
@@ -385,7 +428,7 @@ async fn kasa_transfer(
     .unwrap_or(0.0);
     let hedef_yeni_bakiye = hedef_son_bakiye + input.hedef_miktar;
     let hedef_hareket_aciklama =
-        format!("Transfer <- {} [{}]", kaynak_para_birimi, hedef_aciklama);
+        format!("Transfer \u{2190} {}: {}{}", kaynak_ad, donusum_str, not);
 
     sqlx::query(
         "INSERT INTO kasa_hareketleri (kasa_id, tarih, aciklama, giren, cikan, bakiye)

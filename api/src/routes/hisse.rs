@@ -32,8 +32,10 @@ pub struct Hisse {
 pub struct HisseAtama {
     pub id: i64,
     pub hisse_id: i64,
+    pub hisse_kod: Option<String>,
     pub hissedar_id: i64,
-    pub hissedar_adi: Option<String>,
+    pub hissedar_ad: Option<String>,
+    pub hissedar_soyad: Option<String>,
     pub tarih: chrono::NaiveDate,
     pub ucret: f64,
     pub aciklama: Option<String>,
@@ -44,10 +46,16 @@ pub struct HisseAtama {
 pub struct HisseSatis {
     pub id: i64,
     pub hisse_id: i64,
+    pub hisse_kod: Option<String>,
     pub hissedar_id: i64,
-    pub hissedar_adi: Option<String>,
+    pub hissedar_ad: Option<String>,
+    pub hissedar_soyad: Option<String>,
     pub kasa_id: i64,
+    pub kasa_ad: Option<String>,
+    pub kasa_para_birimi: Option<String>,
     pub satis_tutari: f64,
+    pub odenen_tutar: f64,
+    pub kalan_tutar: f64,
     pub tarih: chrono::NaiveDate,
     pub tamamlandi: bool,
     pub tamamlanma_tarihi: Option<chrono::NaiveDate>,
@@ -351,11 +359,12 @@ async fn ata(
     ).await?;
 
     let atama = sqlx::query_as::<_, HisseAtama>(
-        "SELECT a.id, a.hisse_id, a.hissedar_id,
-                (h.soyad || ' ' || h.ad) AS hissedar_adi,
+        "SELECT a.id, a.hisse_id, hs.kod AS hisse_kod,
+                a.hissedar_id, h.ad AS hissedar_ad, h.soyad AS hissedar_soyad,
                 a.tarih, a.ucret, a.aciklama, a.created_at
          FROM hisse_atamalari a
          JOIN hissedarlar h ON h.id = a.hissedar_id
+         JOIN hisseler hs ON hs.id = a.hisse_id
          WHERE a.id = $1"
     )
     .bind(atama_id)
@@ -493,11 +502,12 @@ async fn transfer(
     }
 
     let atama = sqlx::query_as::<_, HisseAtama>(
-        "SELECT a.id, a.hisse_id, a.hissedar_id,
-                (h.soyad || ' ' || h.ad) AS hissedar_adi,
+        "SELECT a.id, a.hisse_id, hs.kod AS hisse_kod,
+                a.hissedar_id, h.ad AS hissedar_ad, h.soyad AS hissedar_soyad,
                 a.tarih, a.ucret, a.aciklama, a.created_at
          FROM hisse_atamalari a
          JOIN hissedarlar h ON h.id = a.hissedar_id
+         JOIN hisseler hs ON hs.id = a.hisse_id
          WHERE a.id = $1"
     )
     .bind(atama_id)
@@ -512,12 +522,9 @@ async fn satis_baslat(
     Json(input): Json<SatisBaslatInput>,
 ) -> AppResult<Json<HisseSatis>> {
     user.require_izin(&pool, "hisse.yonet").await?;
-    let satis = sqlx::query_as::<_, HisseSatis>(
+    let satis_id: i64 = sqlx::query_scalar(
         "INSERT INTO hisse_satislari (hisse_id, hissedar_id, kasa_id, satis_tutari, tarih, aciklama)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, hisse_id, hissedar_id,
-                   (SELECT soyad || ' ' || ad FROM hissedarlar WHERE id = $2) AS hissedar_adi,
-                   kasa_id, satis_tutari, tarih, tamamlandi, tamamlanma_tarihi, iptal, aciklama, created_at"
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id"
     )
     .bind(input.hisse_id)
     .bind(input.hissedar_id)
@@ -525,6 +532,23 @@ async fn satis_baslat(
     .bind(input.satis_tutari)
     .bind(input.tarih)
     .bind(input.aciklama)
+    .fetch_one(&pool)
+    .await?;
+    let satis = sqlx::query_as::<_, HisseSatis>(
+        "SELECT s.id, s.hisse_id, hs.kod AS hisse_kod,
+                s.hissedar_id, h.ad AS hissedar_ad, h.soyad AS hissedar_soyad,
+                s.kasa_id, k.ad AS kasa_ad, k.para_birimi AS kasa_para_birimi,
+                s.satis_tutari,
+                COALESCE((SELECT SUM(tutar) FROM hisse_satis_odemeleri WHERE satis_id = s.id), 0.0)::DOUBLE PRECISION AS odenen_tutar,
+                (s.satis_tutari - COALESCE((SELECT SUM(tutar) FROM hisse_satis_odemeleri WHERE satis_id = s.id), 0.0))::DOUBLE PRECISION AS kalan_tutar,
+                s.tarih, s.tamamlandi, s.tamamlanma_tarihi, s.iptal, s.aciklama, s.created_at
+         FROM hisse_satislari s
+         JOIN hisseler hs ON hs.id = s.hisse_id
+         JOIN hissedarlar h ON h.id = s.hissedar_id
+         JOIN kasalar k ON k.id = s.kasa_id
+         WHERE s.id = $1"
+    )
+    .bind(satis_id)
     .fetch_one(&pool)
     .await?;
     Ok(Json(satis))
@@ -698,12 +722,17 @@ async fn get_hisse_satis_aktif(
 ) -> AppResult<Json<Option<HisseSatis>>> {
     user.require_izin(&pool, "hisse.goruntule").await?;
     let satis = sqlx::query_as::<_, HisseSatis>(
-        "SELECT s.id, s.hisse_id, s.hissedar_id,
-                (h.soyad || ' ' || h.ad) AS hissedar_adi,
-                s.kasa_id, s.satis_tutari, s.tarih, s.tamamlandi,
-                s.tamamlanma_tarihi, s.iptal, s.aciklama, s.created_at
+        "SELECT s.id, s.hisse_id, hs.kod AS hisse_kod,
+                s.hissedar_id, h.ad AS hissedar_ad, h.soyad AS hissedar_soyad,
+                s.kasa_id, k.ad AS kasa_ad, k.para_birimi AS kasa_para_birimi,
+                s.satis_tutari,
+                COALESCE((SELECT SUM(tutar) FROM hisse_satis_odemeleri WHERE satis_id = s.id), 0.0)::DOUBLE PRECISION AS odenen_tutar,
+                (s.satis_tutari - COALESCE((SELECT SUM(tutar) FROM hisse_satis_odemeleri WHERE satis_id = s.id), 0.0))::DOUBLE PRECISION AS kalan_tutar,
+                s.tarih, s.tamamlandi, s.tamamlanma_tarihi, s.iptal, s.aciklama, s.created_at
          FROM hisse_satislari s
+         JOIN hisseler hs ON hs.id = s.hisse_id
          JOIN hissedarlar h ON h.id = s.hissedar_id
+         JOIN kasalar k ON k.id = s.kasa_id
          WHERE s.hisse_id = $1 AND s.iptal = false
          ORDER BY s.created_at DESC LIMIT 1"
     )
@@ -743,11 +772,12 @@ async fn get_atamalari(
 ) -> AppResult<Json<Vec<HisseAtama>>> {
     user.require_izin(&pool, "hisse.goruntule").await?;
     let liste = sqlx::query_as::<_, HisseAtama>(
-        "SELECT a.id, a.hisse_id, a.hissedar_id,
-                (h.soyad || ' ' || h.ad) AS hissedar_adi,
+        "SELECT a.id, a.hisse_id, hs.kod AS hisse_kod,
+                a.hissedar_id, h.ad AS hissedar_ad, h.soyad AS hissedar_soyad,
                 a.tarih, a.ucret, a.aciklama, a.created_at
          FROM hisse_atamalari a
          JOIN hissedarlar h ON h.id = a.hissedar_id
+         JOIN hisseler hs ON hs.id = a.hisse_id
          WHERE a.hisse_id = $1 ORDER BY a.tarih DESC"
     )
     .bind(hisse_id)

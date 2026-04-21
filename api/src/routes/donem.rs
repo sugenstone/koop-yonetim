@@ -15,6 +15,8 @@ pub struct Donem {
     pub yil: i32,
     pub hisse_basi_aidat: f64,
     pub aktif: bool,
+    #[sqlx(default)]
+    pub toplanti_sayisi: i64,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -33,6 +35,8 @@ pub struct Toplanti {
     pub tarih: chrono::NaiveDate,
     pub konu: String,
     pub yer: Option<String>,
+    #[sqlx(default)]
+    pub karar_sayisi: i64,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -65,8 +69,10 @@ pub struct CreateKararInput {
 pub struct AidatBorc {
     pub id: i64,
     pub donem_id: i64,
+    pub donem_adi: Option<String>,
     pub hissedar_id: i64,
     pub hissedar_ad: Option<String>,
+    pub hissedar_soyad: Option<String>,
     pub hisse_sayisi: i32,
     pub tutar: f64,
     pub odendi: bool,
@@ -101,8 +107,10 @@ pub fn karar_router(pool: PgPool) -> Router {
 async fn get_donemler(user: AuthUser, State(pool): State<PgPool>) -> AppResult<Json<Vec<Donem>>> {
     user.require_izin(&pool, "donem.goruntule").await?;
     let liste = sqlx::query_as::<_, Donem>(
-        "SELECT id, ay, yil, hisse_basi_aidat, aktif, created_at, updated_at
-         FROM donemler ORDER BY yil DESC, ay DESC"
+        "SELECT d.id, d.ay, d.yil, d.hisse_basi_aidat, d.aktif,
+                COALESCE((SELECT COUNT(*) FROM toplantilar WHERE donem_id = d.id), 0) AS toplanti_sayisi,
+                d.created_at, d.updated_at
+         FROM donemler d ORDER BY d.yil DESC, d.ay DESC"
     )
     .fetch_all(&pool)
     .await?;
@@ -112,8 +120,10 @@ async fn get_donemler(user: AuthUser, State(pool): State<PgPool>) -> AppResult<J
 async fn get_donem(user: AuthUser, State(pool): State<PgPool>, Path(id): Path<i64>) -> AppResult<Json<Donem>> {
     user.require_izin(&pool, "donem.goruntule").await?;
     let donem = sqlx::query_as::<_, Donem>(
-        "SELECT id, ay, yil, hisse_basi_aidat, aktif, created_at, updated_at
-         FROM donemler WHERE id = $1"
+        "SELECT d.id, d.ay, d.yil, d.hisse_basi_aidat, d.aktif,
+                COALESCE((SELECT COUNT(*) FROM toplantilar WHERE donem_id = d.id), 0) AS toplanti_sayisi,
+                d.created_at, d.updated_at
+         FROM donemler d WHERE d.id = $1"
     )
     .bind(id)
     .fetch_one(&pool)
@@ -130,7 +140,9 @@ async fn create_donem(
     let donem = sqlx::query_as::<_, Donem>(
         "INSERT INTO donemler (ay, yil, hisse_basi_aidat)
          VALUES ($1, $2, $3)
-         RETURNING id, ay, yil, hisse_basi_aidat, aktif, created_at, updated_at"
+         RETURNING id, ay, yil, hisse_basi_aidat, aktif,
+                   0::BIGINT AS toplanti_sayisi,
+                   created_at, updated_at"
     )
     .bind(input.ay)
     .bind(input.yil)
@@ -150,7 +162,9 @@ async fn update_donem(
     let donem = sqlx::query_as::<_, Donem>(
         "UPDATE donemler SET ay=$1, yil=$2, hisse_basi_aidat=$3, updated_at=NOW()
          WHERE id = $4
-         RETURNING id, ay, yil, hisse_basi_aidat, aktif, created_at, updated_at"
+         RETURNING id, ay, yil, hisse_basi_aidat, aktif,
+                   (SELECT COUNT(*) FROM toplantilar WHERE donem_id = donemler.id) AS toplanti_sayisi,
+                   created_at, updated_at"
     )
     .bind(input.ay)
     .bind(input.yil)
@@ -183,8 +197,10 @@ async fn get_toplantilar(
 ) -> AppResult<Json<Vec<Toplanti>>> {
     user.require_izin(&pool, "donem.goruntule").await?;
     let liste = sqlx::query_as::<_, Toplanti>(
-        "SELECT id, donem_id, tarih, konu, yer, created_at, updated_at
-         FROM toplantilar WHERE donem_id = $1 ORDER BY tarih DESC"
+        "SELECT t.id, t.donem_id, t.tarih, t.konu, t.yer,
+                COALESCE((SELECT COUNT(*) FROM kararlar WHERE toplanti_id = t.id), 0) AS karar_sayisi,
+                t.created_at, t.updated_at
+         FROM toplantilar t WHERE t.donem_id = $1 ORDER BY t.tarih DESC"
     )
     .bind(id)
     .fetch_all(&pool)
@@ -202,7 +218,9 @@ async fn create_toplanti(
     let toplanti = sqlx::query_as::<_, Toplanti>(
         "INSERT INTO toplantilar (donem_id, tarih, konu, yer)
          VALUES ($1, $2, $3, $4)
-         RETURNING id, donem_id, tarih, konu, yer, created_at, updated_at"
+         RETURNING id, donem_id, tarih, konu, yer,
+                   0::BIGINT AS karar_sayisi,
+                   created_at, updated_at"
     )
     .bind(donem_id)
     .bind(input.tarih)
@@ -223,7 +241,9 @@ async fn update_toplanti(
     let toplanti = sqlx::query_as::<_, Toplanti>(
         "UPDATE toplantilar SET tarih=$1, konu=$2, yer=$3, updated_at=NOW()
          WHERE id = $4
-         RETURNING id, donem_id, tarih, konu, yer, created_at, updated_at"
+         RETURNING id, donem_id, tarih, konu, yer,
+                   (SELECT COUNT(*) FROM kararlar WHERE toplanti_id = toplantilar.id) AS karar_sayisi,
+                   created_at, updated_at"
     )
     .bind(input.tarih)
     .bind(input.konu)
@@ -327,11 +347,14 @@ async fn get_donem_borclari(
 ) -> AppResult<Json<Vec<AidatBorc>>> {
     user.require_izin(&pool, "donem.goruntule").await?;
     let liste = sqlx::query_as::<_, AidatBorc>(
-        "SELECT b.id, b.donem_id, b.hissedar_id,
-                h.ad || ' ' || h.soyad AS hissedar_ad,
+        "SELECT b.id, b.donem_id,
+                (d.ay::text || '/' || d.yil::text) AS donem_adi,
+                b.hissedar_id,
+                h.ad AS hissedar_ad, h.soyad AS hissedar_soyad,
                 b.hisse_sayisi, b.tutar, b.odendi, b.odeme_tarihi, b.aciklama, b.created_at
          FROM donem_aidat_borclari b
          JOIN hissedarlar h ON h.id = b.hissedar_id
+         JOIN donemler d ON d.id = b.donem_id
          WHERE b.donem_id = $1
          ORDER BY h.ad, h.soyad"
     )
@@ -353,7 +376,9 @@ async fn donem_borc_olustur(
     user.require_izin(&pool, "donem.yonet").await?;
     // Dönemin aidat miktarını al
     let donem = sqlx::query_as::<_, Donem>(
-        "SELECT id, ay, yil, hisse_basi_aidat, aktif, created_at, updated_at
+        "SELECT id, ay, yil, hisse_basi_aidat, aktif,
+                0::BIGINT AS toplanti_sayisi,
+                created_at, updated_at
          FROM donemler WHERE id = $1"
     )
     .bind(donem_id)

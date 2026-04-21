@@ -543,6 +543,7 @@ export interface HisseSatis {
 	hissedar_soyad: string;
 	kasa_id: number;
 	kasa_ad: string;
+	kasa_para_birimi?: string;
 	satis_tutari: number;
 	odenen_tutar: number;
 	kalan_tutar: number;
@@ -691,6 +692,7 @@ export interface GelirGiderKayit {
 	id: number;
 	kasa_id: number;
 	kasa_ad: string;
+	kasa_para_birimi?: ParaBirimi;
 	kategori_id: number;
 	kategori_ad: string;
 	kategori_tip: GelirGiderTip;
@@ -707,6 +709,7 @@ export interface CreateKayitInput {
 	tarih: string;
 	tutar: number;
 	aciklama: string;
+	para_birimi: ParaBirimi;
 }
 
 // ─── Gelir/Gider API'leri ─────────────────────────────────────────────────────
@@ -726,4 +729,41 @@ export const gelirGiderApi = {
 	create: (input: CreateKayitInput): Promise<GelirGiderKayit> =>
 		invoke('create_gelir_gider_kaydi', { input }),
 	delete: (id: number): Promise<void> => invoke('delete_gelir_gider_kaydi', { id }),
+};
+
+// ─── İşlem Logları (Audit) ────────────────────────────────────────────────────
+
+export interface IslemLog {
+	id: number;
+	tarih: string;
+	kullanici_id?: number;
+	kullanici_email?: string;
+	rol?: string;
+	yontem: string;
+	yol: string;
+	durum_kodu: number;
+	ip?: string;
+	user_agent?: string;
+	sure_ms?: number;
+	hata?: string;
+}
+
+export interface LogOzet {
+	toplam: number;
+	son_24_saat: number;
+	hata_24_saat: number;
+}
+
+export interface LogFiltre {
+	limit?: number;
+	offset?: number;
+	kullanici_id?: number;
+	yontem?: string;
+	min_durum?: number;
+	q?: string;
+}
+
+export const logApi = {
+	getAll: (f: LogFiltre = {}): Promise<IslemLog[]> => invoke('get_loglar', f),
+	ozet: (): Promise<LogOzet> => invoke('get_log_ozet'),
 };

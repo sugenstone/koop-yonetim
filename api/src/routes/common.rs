@@ -123,7 +123,39 @@ pub async fn kasa_son_bakiye(pool: &PgPool, kasa_id: i64) -> sqlx::Result<f64> {
     Ok(b.unwrap_or(0.0))
 }
 
-/// Kasaya giren kaydı + kasalar.bakiye günceller
+/// Kasa hareketlerini kronolojik sırayla (tarih, id) running bakiye ile yeniden
+/// hesaplar; kasalar.bakiye'yi nihai bakiyeye gunceller.
+/// Hareket ekleme/silme sonrasi cagrilmalidir.
+pub async fn recompute_kasa_bakiyeleri(pool: &PgPool, kasa_id: i64) -> sqlx::Result<f64> {
+    #[derive(sqlx::FromRow)]
+    struct Row { id: i64, giren: f64, cikan: f64 }
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT id, giren, cikan FROM kasa_hareketleri
+         WHERE kasa_id = $1 ORDER BY tarih ASC, id ASC",
+    )
+    .bind(kasa_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut running = 0.0_f64;
+    for r in &rows {
+        running += r.giren - r.cikan;
+        sqlx::query("UPDATE kasa_hareketleri SET bakiye = $1 WHERE id = $2")
+            .bind(running)
+            .bind(r.id)
+            .execute(pool)
+            .await?;
+    }
+
+    sqlx::query("UPDATE kasalar SET bakiye = $1, updated_at = NOW() WHERE id = $2")
+        .bind(running)
+        .bind(kasa_id)
+        .execute(pool)
+        .await?;
+    Ok(running)
+}
+
+/// Kasaya giren kaydı + kasalar.bakiye günceller (kronolojik recompute)
 pub async fn kasa_giren_ekle(
     pool: &PgPool,
     kasa_id: i64,
@@ -131,28 +163,20 @@ pub async fn kasa_giren_ekle(
     aciklama: &str,
     tutar: f64,
 ) -> sqlx::Result<f64> {
-    let onceki = kasa_son_bakiye(pool, kasa_id).await?;
-    let yeni = onceki + tutar;
     sqlx::query(
         "INSERT INTO kasa_hareketleri (kasa_id, tarih, aciklama, giren, cikan, bakiye)
-         VALUES ($1, $2, $3, $4, 0.0, $5)",
+         VALUES ($1, $2, $3, $4, 0.0, 0.0)",
     )
     .bind(kasa_id)
     .bind(tarih)
     .bind(aciklama)
     .bind(tutar)
-    .bind(yeni)
     .execute(pool)
     .await?;
-    sqlx::query("UPDATE kasalar SET bakiye = $1, updated_at = NOW() WHERE id = $2")
-        .bind(yeni)
-        .bind(kasa_id)
-        .execute(pool)
-        .await?;
-    Ok(yeni)
+    recompute_kasa_bakiyeleri(pool, kasa_id).await
 }
 
-/// Kasadan çıkan kaydı + kasalar.bakiye günceller
+/// Kasadan çıkan kaydı + kasalar.bakiye günceller (kronolojik recompute)
 pub async fn kasa_cikan_ekle(
     pool: &PgPool,
     kasa_id: i64,
@@ -160,25 +184,17 @@ pub async fn kasa_cikan_ekle(
     aciklama: &str,
     tutar: f64,
 ) -> sqlx::Result<f64> {
-    let onceki = kasa_son_bakiye(pool, kasa_id).await?;
-    let yeni = onceki - tutar;
     sqlx::query(
         "INSERT INTO kasa_hareketleri (kasa_id, tarih, aciklama, giren, cikan, bakiye)
-         VALUES ($1, $2, $3, 0.0, $4, $5)",
+         VALUES ($1, $2, $3, 0.0, $4, 0.0)",
     )
     .bind(kasa_id)
     .bind(tarih)
     .bind(aciklama)
     .bind(tutar)
-    .bind(yeni)
     .execute(pool)
     .await?;
-    sqlx::query("UPDATE kasalar SET bakiye = $1, updated_at = NOW() WHERE id = $2")
-        .bind(yeni)
-        .bind(kasa_id)
-        .execute(pool)
-        .await?;
-    Ok(yeni)
+    recompute_kasa_bakiyeleri(pool, kasa_id).await
 }
 
 // ─── Hissedar yardımcıları ─────────────────────────────────────────────────

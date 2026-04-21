@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod audit;
 pub mod common;
 pub mod kasa;
 pub mod hissedar;
@@ -37,6 +38,7 @@ pub fn all_routes(pool: PgPool) -> Router {
         .nest("/hisseler",     hisse::router(pool.clone()))
         .nest("/gelir-gider",  gelir_gider::router(pool.clone()))
         .nest("/izinler",      izin::router(pool.clone()))
+        .nest("/loglar",       audit::router(pool.clone()))
         .nest("/admin",        admin::router(pool.clone()))
         .layer(middleware::from_fn(require_auth));
 
@@ -44,4 +46,9 @@ pub fn all_routes(pool: PgPool) -> Router {
     Router::new()
         .nest("/auth", crate::auth::router(pool.clone()))
         .merge(korumali)
+        // Audit middleware: tum yazma isteklerini (public + korumali) kaydet
+        .layer(middleware::from_fn_with_state(
+            pool.clone(),
+            audit::audit_middleware,
+        ))
 }

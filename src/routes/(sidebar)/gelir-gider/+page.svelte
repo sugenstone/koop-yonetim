@@ -28,7 +28,8 @@
     type GelirGiderKayit,
     type GelirGiderKategori,
     type CreateKayitInput,
-    type Kasa
+    type Kasa,
+    type ParaBirimi
   } from '$lib/tauri-api';
   import DataTable from '$lib/components/DataTable.svelte';
   import type { DataTableColumn } from '$lib/components/dataTableUtils';
@@ -61,6 +62,7 @@
   let fTarih = $state(bugun());
   let fTutar = $state('');
   let fAciklama = $state('');
+  let fParaBirimi = $state<ParaBirimi | ''>('');
 
   // ─── Yükle ─────────────────────────────────────────────────────────────────
 
@@ -104,17 +106,23 @@
 
   function yeniAc(tip: 'gelir' | 'gider' = 'gelir') {
     fTip = tip;
-    fKasaId = kasalar.find((k) => k.aktif)?.id ?? '';
+    const ilkKasa = kasalar.find((k) => k.aktif);
+    fKasaId = ilkKasa?.id ?? '';
     fKategoriId = '';
     fTarih = bugun();
     fTutar = '';
     fAciklama = '';
+    fParaBirimi = ilkKasa?.para_birimi ?? '';
     modalAcik = true;
   }
 
   async function kaydet() {
     const tutar = parseFloat(String(fTutar).replace(',', '.'));
-    if (!fKasaId || !fKategoriId || !fAciklama.trim() || isNaN(tutar) || tutar <= 0) return;
+    if (!fKasaId || !fKategoriId || !fAciklama.trim() || !fParaBirimi || isNaN(tutar) || tutar <= 0) return;
+    if (secilenKasa && fParaBirimi !== secilenKasa.para_birimi) {
+      notify.error(`Para birimi uyusmazligi: kasa ${secilenKasa.para_birimi}, secim ${fParaBirimi}`);
+      return;
+    }
     kaydediliyor = true;
     hata = '';
     try {
@@ -123,7 +131,8 @@
         kategori_id: Number(fKategoriId),
         tarih: fTarih,
         tutar,
-        aciklama: fAciklama.trim()
+        aciklama: fAciklama.trim(),
+        para_birimi: fParaBirimi as ParaBirimi
       };
       await gelirGiderApi.create(input);
       modalAcik = false;
@@ -181,6 +190,32 @@
   }
 
   const aktifKasalar = $derived(kasalar.filter((k) => k.aktif));
+
+  const secilenKasa = $derived(
+    fKasaId ? kasalar.find((k) => k.id === Number(fKasaId)) : undefined
+  );
+
+  // Kasa degistikce para birimini otomatik uyumlu hale getir
+  $effect(() => {
+    if (secilenKasa && fParaBirimi !== secilenKasa.para_birimi) {
+      fParaBirimi = secilenKasa.para_birimi;
+    }
+  });
+
+  const paraBirimleri: ParaBirimi[] = ['TL', 'USD', 'EUR', 'ALTIN'];
+
+  // Para birimine gore toplam gelir/gider ozetleri
+  const toplamlarPB = $derived.by(() => {
+    const map = new Map<string, { gelir: number; gider: number }>();
+    for (const k of filtrelenmis) {
+      const pb = k.kasa_para_birimi ?? 'TL';
+      const cur = map.get(pb) ?? { gelir: 0, gider: 0 };
+      if (k.kategori_tip === 'gelir') cur.gelir += k.tutar;
+      else cur.gider += k.tutar;
+      map.set(pb, cur);
+    }
+    return Array.from(map.entries()).map(([pb, v]) => ({ pb, ...v, net: v.gelir - v.gider }));
+  });
 
   const modalKategoriler = $derived(
     kategoriler.filter((k) => k.tip === fTip && k.aktif)
@@ -240,26 +275,31 @@
     </div>
   {/if}
 
-  <!-- Özet Kartlar -->
-  <div class="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-    <div class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-      <p class="text-sm text-gray-500 dark:text-gray-400">Toplam Gelir</p>
-      <p class="text-xl font-bold text-green-600 dark:text-green-400">
-        {tutarFormat(toplamGelir)} ₺
-      </p>
-    </div>
-    <div class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-      <p class="text-sm text-gray-500 dark:text-gray-400">Toplam Gider</p>
-      <p class="text-xl font-bold text-red-600 dark:text-red-400">
-        {tutarFormat(toplamGider)} ₺
-      </p>
-    </div>
-    <div class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-      <p class="text-sm text-gray-500 dark:text-gray-400">Net</p>
-      <p class="text-xl font-bold {toplamGelir - toplamGider >= 0 ? 'text-gray-900 dark:text-white' : 'text-red-600 dark:text-red-400'}">
-        {tutarFormat(toplamGelir - toplamGider)} ₺
-      </p>
-    </div>
+  <!-- Özet Kartlar (para birimine göre) -->
+  <div class="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    {#each toplamlarPB as t (t.pb)}
+      <div class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+        <p class="text-sm font-medium text-gray-500 dark:text-gray-400">{t.pb}</p>
+        <div class="mt-1 flex items-baseline justify-between gap-2">
+          <span class="text-xs text-green-600 dark:text-green-400">Gelir</span>
+          <span class="font-semibold text-green-600 dark:text-green-400">{tutarFormat(t.gelir)}</span>
+        </div>
+        <div class="flex items-baseline justify-between gap-2">
+          <span class="text-xs text-red-600 dark:text-red-400">Gider</span>
+          <span class="font-semibold text-red-600 dark:text-red-400">{tutarFormat(t.gider)}</span>
+        </div>
+        <div class="mt-1 flex items-baseline justify-between gap-2 border-t border-gray-200 pt-1 dark:border-gray-700">
+          <span class="text-xs text-gray-500 dark:text-gray-400">Net</span>
+          <span class="font-bold {t.net >= 0 ? 'text-gray-900 dark:text-white' : 'text-red-600 dark:text-red-400'}">
+            {tutarFormat(t.net)} {t.pb}
+          </span>
+        </div>
+      </div>
+    {:else}
+      <div class="rounded-xl border border-dashed border-gray-200 bg-white p-4 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
+        Filtreye uyan kayıt yok
+      </div>
+    {/each}
   </div>
 
   <!-- Filtreler -->
@@ -354,7 +394,7 @@
           {/if}
           {#if visibleCols.has('tutar')}
             <TableBodyCell class="text-right font-bold {k.kategori_tip === 'gelir' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}">
-              {k.kategori_tip === 'gider' ? '-' : ''}{tutarFormat(k.tutar)}
+              {k.kategori_tip === 'gider' ? '-' : ''}{tutarFormat(k.tutar)} {k.kasa_para_birimi ?? ''}
             </TableBodyCell>
           {/if}
           {#if visibleCols.has('islemler')}
@@ -432,6 +472,27 @@
     </div>
 
     <div>
+      <Label for="fParaBirimi" class="mb-2">Para Birimi *</Label>
+      <Select id="fParaBirimi" bind:value={fParaBirimi} required>
+        <option value="">Para birimi seçin...</option>
+        {#each paraBirimleri as pb}
+          <option value={pb}>{pb}</option>
+        {/each}
+      </Select>
+      {#if secilenKasa && fParaBirimi && fParaBirimi !== secilenKasa.para_birimi}
+        <p class="mt-1 text-xs font-medium text-red-600 dark:text-red-400">
+          Uyarı: Seçtiğiniz kasa <b>{secilenKasa.para_birimi}</b> biriminde,
+          ama para birimi olarak <b>{fParaBirimi}</b> seçtiniz. Aynı birime sahip bir kasa seçin
+          veya tutarı ilgili birime çevirin.
+        </p>
+      {:else if secilenKasa}
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          Kasa birimi: <b>{secilenKasa.para_birimi}</b>
+        </p>
+      {/if}
+    </div>
+
+    <div>
       <Label for="fKategoriId" class="mb-2">Kategori *</Label>
       <Select id="fKategoriId" bind:value={fKategoriId} required>
         <option value="">Kategori seçin...</option>
@@ -453,7 +514,7 @@
     </div>
 
     <div>
-      <Label for="fTutar" class="mb-2">Tutar *</Label>
+      <Label for="fTutar" class="mb-2">Tutar{fParaBirimi ? ` (${fParaBirimi})` : ''} *</Label>
       <Input
         id="fTutar"
         type="number"
@@ -482,7 +543,7 @@
       <Button
         color={fTip === 'gelir' ? 'green' : 'red'}
         onclick={kaydet}
-        disabled={kaydediliyor || !fKasaId || !fKategoriId || !fAciklama.trim() || !fTutar}
+        disabled={kaydediliyor || !fKasaId || !fKategoriId || !fAciklama.trim() || !fTutar || !fParaBirimi || (!!secilenKasa && fParaBirimi !== secilenKasa.para_birimi)}
       >
         {#if kaydediliyor}<Spinner class="me-2" size="4" />{/if}
         Kaydet

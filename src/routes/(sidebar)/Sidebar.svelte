@@ -59,7 +59,8 @@
     { name: 'Dönem', Icon: CalendarMonthSolid, href: '/donem', izin: 'donem.goruntule' },
     { name: 'Hisse', Icon: LayersSolid, href: '/hisse', izin: 'hisse.goruntule' },
     { name: 'Kullanıcılar', Icon: UserSettingsSolid, href: '/kullanicilar', izin: 'kullanici.goruntule' },
-    { name: 'Rol & İzinler', Icon: UserSettingsSolid, href: '/roller', izin: 'rol.yonet' }
+    { name: 'Rol & İzinler', Icon: UserSettingsSolid, href: '/roller', izin: 'rol.yonet' },
+    { name: 'İşlem Logları', Icon: UserSettingsSolid, href: '/loglar', izin: 'log.goruntule' }
   ];
 
   let posts = $derived(tumMenuler.filter((m) => izinVar(m.izin)));
