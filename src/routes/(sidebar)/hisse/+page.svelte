@@ -115,7 +115,11 @@
       header: 'Hissedar / Açıklama',
       accessor: (h) =>
         h.durum === 'atanmis' && h.hissedar_ad
-          ? `${h.hissedar_ad} ${h.hissedar_soyad ?? ''} ${h.aciklama ?? ''}`
+          ? [
+              `${h.hissedar_ad} ${h.hissedar_soyad ?? ''}`.trim(),
+              h.hissedar_yakin_adi ?? '',
+              h.aciklama ?? ''
+            ].filter(Boolean).join(' ')
           : h.aciklama ?? ''
     },
     {
@@ -359,9 +363,14 @@
                 <div class="flex items-center gap-1.5">
                   <UsersSolid class="h-3.5 w-3.5 text-yellow-500 flex-shrink-0" />
                   <span class="font-medium text-gray-800 dark:text-gray-200">
-                    {hissedarLabelFromFields(hisse.hissedar_id, hisse.hissedar_ad, hisse.hissedar_soyad, hissedarlar)}
+                    {hisse.hissedar_ad} {hisse.hissedar_soyad ?? ''}
                   </span>
                 </div>
+                {#if hisse.hissedar_yakin_adi}
+                  <p class="mt-0.5 text-xs text-gray-400">
+                    {hisse.hissedar_yakin_adi}{hisse.hissedar_yakinlik_derecesi ? ` (${hisse.hissedar_yakinlik_derecesi})` : ''}
+                  </p>
+                {/if}
                 {#if hisse.aciklama}
                   <p class="mt-0.5 text-xs text-gray-400">{hisse.aciklama}</p>
                 {/if}

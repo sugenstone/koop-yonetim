@@ -459,6 +459,9 @@ export interface Hisse {
 	hissedar_id?: number;
 	hissedar_ad?: string;
 	hissedar_soyad?: string;
+	hissedar_yakin_adi?: string;
+	hissedar_yakinlik_derecesi?: string;
+	atama_tarih?: string;
 }
 
 export interface HisseAtama {

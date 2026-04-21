@@ -19,7 +19,10 @@ pub struct Hisse {
     pub durum: String,
     pub aciklama: Option<String>,
     pub hissedar_id: Option<i64>,
-    pub hissedar_adi: Option<String>,
+    pub hissedar_ad: Option<String>,
+    pub hissedar_soyad: Option<String>,
+    pub hissedar_yakin_adi: Option<String>,
+    pub hissedar_yakinlik_derecesi: Option<String>,
     pub atama_tarih: Option<chrono::NaiveDate>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -154,7 +157,10 @@ async fn get_hisseler(user: AuthUser, State(pool): State<PgPool>) -> AppResult<J
     let liste = sqlx::query_as::<_, Hisse>(
         "SELECT h.id, h.kod, h.durum, h.aciklama,
                 a.hissedar_id,
-                (SELECT soyad || ' ' || ad FROM hissedarlar WHERE id = a.hissedar_id) AS hissedar_adi,
+                hsd.ad AS hissedar_ad,
+                hsd.soyad AS hissedar_soyad,
+                hsd.yakin_adi AS hissedar_yakin_adi,
+                hsd.yakinlik_derecesi AS hissedar_yakinlik_derecesi,
                 a.tarih AS atama_tarih,
                 h.created_at, h.updated_at
          FROM hisseler h
@@ -162,6 +168,7 @@ async fn get_hisseler(user: AuthUser, State(pool): State<PgPool>) -> AppResult<J
              SELECT hissedar_id, tarih FROM hisse_atamalari
              WHERE hisse_id = h.id ORDER BY tarih DESC LIMIT 1
          ) a ON true
+         LEFT JOIN hissedarlar hsd ON hsd.id = a.hissedar_id
          ORDER BY h.kod"
     )
     .fetch_all(&pool)
@@ -174,7 +181,10 @@ async fn get_hisse(user: AuthUser, State(pool): State<PgPool>, Path(id): Path<i6
     let hisse = sqlx::query_as::<_, Hisse>(
         "SELECT h.id, h.kod, h.durum, h.aciklama,
                 a.hissedar_id,
-                (SELECT soyad || ' ' || ad FROM hissedarlar WHERE id = a.hissedar_id) AS hissedar_adi,
+                hsd.ad AS hissedar_ad,
+                hsd.soyad AS hissedar_soyad,
+                hsd.yakin_adi AS hissedar_yakin_adi,
+                hsd.yakinlik_derecesi AS hissedar_yakinlik_derecesi,
                 a.tarih AS atama_tarih,
                 h.created_at, h.updated_at
          FROM hisseler h
@@ -182,6 +192,7 @@ async fn get_hisse(user: AuthUser, State(pool): State<PgPool>, Path(id): Path<i6
              SELECT hissedar_id, tarih FROM hisse_atamalari
              WHERE hisse_id = h.id ORDER BY tarih DESC LIMIT 1
          ) a ON true
+         LEFT JOIN hissedarlar hsd ON hsd.id = a.hissedar_id
          WHERE h.id = $1"
     )
     .bind(id)
@@ -209,7 +220,11 @@ async fn create_hisse(
         "INSERT INTO hisseler (kod, aciklama)
          VALUES ($1, $2)
          RETURNING id, kod, durum, aciklama,
-                   NULL::BIGINT AS hissedar_id, NULL::TEXT AS hissedar_adi,
+                   NULL::BIGINT AS hissedar_id,
+                   NULL::TEXT AS hissedar_ad,
+                   NULL::TEXT AS hissedar_soyad,
+                   NULL::TEXT AS hissedar_yakin_adi,
+                   NULL::TEXT AS hissedar_yakinlik_derecesi,
                    NULL::DATE AS atama_tarih,
                    created_at, updated_at"
     )
@@ -228,7 +243,10 @@ async fn create_hisse(
         let hisse = sqlx::query_as::<_, Hisse>(
             "SELECT h.id, h.kod, h.durum, h.aciklama,
                     a.hissedar_id,
-                    (SELECT soyad || ' ' || ad FROM hissedarlar WHERE id = a.hissedar_id) AS hissedar_adi,
+                    hsd.ad AS hissedar_ad,
+                    hsd.soyad AS hissedar_soyad,
+                    hsd.yakin_adi AS hissedar_yakin_adi,
+                    hsd.yakinlik_derecesi AS hissedar_yakinlik_derecesi,
                     a.tarih AS atama_tarih,
                     h.created_at, h.updated_at
              FROM hisseler h
@@ -236,6 +254,7 @@ async fn create_hisse(
                  SELECT hissedar_id, tarih FROM hisse_atamalari
                  WHERE hisse_id = h.id ORDER BY tarih DESC LIMIT 1
              ) a ON true
+             LEFT JOIN hissedarlar hsd ON hsd.id = a.hissedar_id
              WHERE h.id = $1"
         )
         .bind(hisse.id)
@@ -266,7 +285,11 @@ async fn create_toplu(
             "INSERT INTO hisseler (kod, aciklama)
              VALUES ($1, $2)
              RETURNING id, kod, durum, aciklama,
-                       NULL::BIGINT AS hissedar_id, NULL::TEXT AS hissedar_adi,
+                       NULL::BIGINT AS hissedar_id,
+                       NULL::TEXT AS hissedar_ad,
+                       NULL::TEXT AS hissedar_soyad,
+                       NULL::TEXT AS hissedar_yakin_adi,
+                       NULL::TEXT AS hissedar_yakinlik_derecesi,
                        NULL::DATE AS atama_tarih,
                        created_at, updated_at"
         )
@@ -291,7 +314,10 @@ async fn create_toplu(
         let guncel = sqlx::query_as::<_, Hisse>(
             "SELECT h.id, h.kod, h.durum, h.aciklama,
                     a.hissedar_id,
-                    (SELECT soyad || ' ' || ad FROM hissedarlar WHERE id = a.hissedar_id) AS hissedar_adi,
+                    hsd.ad AS hissedar_ad,
+                    hsd.soyad AS hissedar_soyad,
+                    hsd.yakin_adi AS hissedar_yakin_adi,
+                    hsd.yakinlik_derecesi AS hissedar_yakinlik_derecesi,
                     a.tarih AS atama_tarih,
                     h.created_at, h.updated_at
              FROM hisseler h
@@ -299,6 +325,7 @@ async fn create_toplu(
                  SELECT hissedar_id, tarih FROM hisse_atamalari
                  WHERE hisse_id = h.id ORDER BY tarih DESC LIMIT 1
              ) a ON true
+             LEFT JOIN hissedarlar hsd ON hsd.id = a.hissedar_id
              WHERE h.id = ANY($1)
              ORDER BY h.id"
         )
