@@ -255,6 +255,7 @@ async fn cuzdan_para_ekle(
 ) -> AppResult<Json<ParaEkleSonuc>> {
     use super::common::{
         cuzdan_alacak_ekle, cuzdan_son_bakiye, hissedar_bilgi, kasa_giren_ekle,
+        tahsilat_aciklamasi, donem_adi,
     };
     user.require_izin(&pool, "hissedar.cuzdan").await?;
 
@@ -267,34 +268,47 @@ async fn cuzdan_para_ekle(
     let h = hissedar_bilgi(&pool, id).await?;
     let tarih = chrono::Utc::now().date_naive();
 
-    // 1) Cüzdana alacak (para yatırma)
+    // 1) Cüzdana alacak (para yatırma) — kasaya yazım YOK:
+    //    Borçlar oluşturulduğunda cüzdana -tutar olarak işlenmişti (IOU).
+    //    Deposit, bu IOU'ları mahsup eder. Ödenen her borç için kasaya ayrı
+    //    (detaylı) bir "giren" kaydı yazılır (Tauri paritesi).
     let yatirma_ac = input.aciklama.clone().unwrap_or_else(|| "Para yatırma".to_string());
     cuzdan_alacak_ekle(&pool, id, None, tarih, &yatirma_ac, input.tutar).await?;
 
-    // 2) Kasaya giriş (nakit kasaya geldi)
-    let kasa_ac = format!("Hissedar para yatırma: {} {}", h.ad, h.soyad);
-    kasa_giren_ekle(&pool, h.kasa_id, tarih, &kasa_ac, input.tutar).await?;
-
-    // 3) Ödenmemiş aidat borçları: bakiye yettiği sürece öde (kasa değil — zaten yattı;
-    //    cüzdanda IOU olarak -tutar var, ödendi=true yapmak yeterli, cüzdan mahsup zaten oluşmuş durumda)
+    // 2) Ödenmemiş aidat borçlarını sıralı getir
     #[derive(sqlx::FromRow)]
-    struct AidatBorc { id: i64, tutar: f64 }
+    struct AidatBorc {
+        id: i64,
+        hisse_sayisi: i32,
+        tutar: f64,
+        ay: i32,
+        yil: i32,
+    }
     let borclar: Vec<AidatBorc> = sqlx::query_as(
-        "SELECT id, tutar FROM donem_aidat_borclari
-         WHERE hissedar_id = $1 AND odendi = false
-         ORDER BY created_at ASC, id ASC"
+        "SELECT b.id, b.hisse_sayisi, b.tutar, d.ay, d.yil
+         FROM donem_aidat_borclari b
+         JOIN donemler d ON d.id = b.donem_id
+         WHERE b.hissedar_id = $1 AND b.odendi = false
+         ORDER BY d.yil ASC, d.ay ASC, b.id ASC"
     )
     .bind(id)
     .fetch_all(&pool)
     .await?;
 
+    // Tauri paritesi: harcanabilir nakit = cüzdan_bakiye + ödenmemiş IOU toplamı
+    //   Çünkü ödenmemiş borçlar zaten bakiyeden düşülmüş durumda.
+    let unpaid_iou_sum: f64 = borclar.iter().map(|b| b.tutar).sum();
+    let bakiye_after_deposit = cuzdan_son_bakiye(&pool, id).await?;
+    let mut nakit_var: f64 = bakiye_after_deposit + unpaid_iou_sum;
+    const EPS: f64 = 0.005;
+
     let mut tahsil_sayisi: i64 = 0;
     let mut tahsil_toplam: f64 = 0.0;
 
     for borc in &borclar {
-        let mevcut = cuzdan_son_bakiye(&pool, id).await?;
-        if mevcut < borc.tutar { break; }
+        if nakit_var + EPS < borc.tutar { break; }
 
+        // Borcu ödenmiş işaretle
         sqlx::query(
             "UPDATE donem_aidat_borclari SET odendi = true, odeme_tarihi = $1 WHERE id = $2"
         )
@@ -302,8 +316,51 @@ async fn cuzdan_para_ekle(
         .bind(borc.id)
         .execute(&pool)
         .await?;
+
+        // Kasaya detaylı giren kaydı (deposit anında değil, tahsilat anında)
+        let d_ad = donem_adi(borc.ay, borc.yil);
+        let kasa_ac = tahsilat_aciklamasi(
+            &d_ad,
+            borc.hisse_sayisi as i64,
+            &h.ad,
+            &h.soyad,
+            &h.yakin_adi,
+            &h.yakinlik_derecesi,
+        );
+        kasa_giren_ekle(&pool, h.kasa_id, tarih, &kasa_ac, borc.tutar).await?;
+
+        // Cüzdana ek kayıt yazılmaz; IOU ile deposit kendini nötrler.
+        nakit_var -= borc.tutar;
         tahsil_sayisi += 1;
         tahsil_toplam += borc.tutar;
+    }
+
+    // 3) Hisse satın alma borçları (cüzdanda "Hisse satın alma:" prefix'li kayıtlar)
+    //    Ödenmemiş kısmı: SUM(borc) − SUM(alacak "Hisse satın alma tahsilatı:")
+    let hisse_borc_toplam: f64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(borc), 0)::double precision FROM hissedar_cuzdanlari
+         WHERE hissedar_id = $1 AND borc > 0 AND bilgi LIKE 'Hisse satın alma:%'"
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap_or(0.0);
+    let hisse_tahsil_toplam: f64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(alacak), 0)::double precision FROM hissedar_cuzdanlari
+         WHERE hissedar_id = $1 AND alacak > 0 AND bilgi LIKE 'Hisse satın alma tahsilatı:%'"
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap_or(0.0);
+    let odenmemis_hisse_borc = hisse_borc_toplam - hisse_tahsil_toplam;
+
+    if odenmemis_hisse_borc > EPS && nakit_var + EPS >= odenmemis_hisse_borc {
+        // Tek konsolide kasa giren + cüzdan alacak (Tauri paritesi)
+        let kasa_ac = format!("Hisse satın alma tahsilatı: {} {}", h.ad, h.soyad);
+        kasa_giren_ekle(&pool, h.kasa_id, tarih, &kasa_ac, odenmemis_hisse_borc).await?;
+        cuzdan_alacak_ekle(&pool, id, None, tarih, "Hisse satın alma tahsilatı", odenmemis_hisse_borc).await?;
+        tahsil_toplam += odenmemis_hisse_borc;
     }
 
     let yeni_bakiye = cuzdan_son_bakiye(&pool, id).await?;
