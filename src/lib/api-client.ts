@@ -3,7 +3,7 @@
  * Tauri komut adlarini REST endpoint'lerine haritalar.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 const TOKEN_KEY = 'koop_token';
 
 export function getToken(): string | null {
