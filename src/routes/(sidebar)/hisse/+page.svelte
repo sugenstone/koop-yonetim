@@ -120,8 +120,8 @@
     },
     {
       id: 'olusturulma',
-      header: 'Oluşturulma',
-      accessor: (h) => h.created_at
+      header: 'Atama Tarihi',
+      accessor: (h) => h.atama_tarih ?? ''
     },
     { id: 'islemler', header: '', accessor: () => '', sortable: false, searchable: false }
   ];
@@ -374,7 +374,7 @@
           {/if}
           {#if visibleCols.has('olusturulma')}
             <TableBodyCell class="text-sm text-gray-500 dark:text-gray-400">
-              {new Date(hisse.created_at).toLocaleDateString('tr-TR')}
+              {hisse.atama_tarih ? new Date(hisse.atama_tarih).toLocaleDateString('tr-TR') : '—'}
             </TableBodyCell>
           {/if}
           {#if visibleCols.has('islemler')}
