@@ -20,6 +20,7 @@ pub struct Hisse {
     pub aciklama: Option<String>,
     pub hissedar_id: Option<i64>,
     pub hissedar_adi: Option<String>,
+    pub atama_tarih: Option<chrono::NaiveDate>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -154,10 +155,11 @@ async fn get_hisseler(user: AuthUser, State(pool): State<PgPool>) -> AppResult<J
         "SELECT h.id, h.kod, h.durum, h.aciklama,
                 a.hissedar_id,
                 (SELECT soyad || ' ' || ad FROM hissedarlar WHERE id = a.hissedar_id) AS hissedar_adi,
+                a.tarih AS atama_tarih,
                 h.created_at, h.updated_at
          FROM hisseler h
          LEFT JOIN LATERAL (
-             SELECT hissedar_id FROM hisse_atamalari
+             SELECT hissedar_id, tarih FROM hisse_atamalari
              WHERE hisse_id = h.id ORDER BY tarih DESC LIMIT 1
          ) a ON true
          ORDER BY h.kod"
@@ -173,10 +175,11 @@ async fn get_hisse(user: AuthUser, State(pool): State<PgPool>, Path(id): Path<i6
         "SELECT h.id, h.kod, h.durum, h.aciklama,
                 a.hissedar_id,
                 (SELECT soyad || ' ' || ad FROM hissedarlar WHERE id = a.hissedar_id) AS hissedar_adi,
+                a.tarih AS atama_tarih,
                 h.created_at, h.updated_at
          FROM hisseler h
          LEFT JOIN LATERAL (
-             SELECT hissedar_id FROM hisse_atamalari
+             SELECT hissedar_id, tarih FROM hisse_atamalari
              WHERE hisse_id = h.id ORDER BY tarih DESC LIMIT 1
          ) a ON true
          WHERE h.id = $1"
@@ -207,6 +210,7 @@ async fn create_hisse(
          VALUES ($1, $2)
          RETURNING id, kod, durum, aciklama,
                    NULL::BIGINT AS hissedar_id, NULL::TEXT AS hissedar_adi,
+                   NULL::DATE AS atama_tarih,
                    created_at, updated_at"
     )
     .bind(kod)
@@ -225,10 +229,11 @@ async fn create_hisse(
             "SELECT h.id, h.kod, h.durum, h.aciklama,
                     a.hissedar_id,
                     (SELECT soyad || ' ' || ad FROM hissedarlar WHERE id = a.hissedar_id) AS hissedar_adi,
+                    a.tarih AS atama_tarih,
                     h.created_at, h.updated_at
              FROM hisseler h
              LEFT JOIN LATERAL (
-                 SELECT hissedar_id FROM hisse_atamalari
+                 SELECT hissedar_id, tarih FROM hisse_atamalari
                  WHERE hisse_id = h.id ORDER BY tarih DESC LIMIT 1
              ) a ON true
              WHERE h.id = $1"
@@ -262,6 +267,7 @@ async fn create_toplu(
              VALUES ($1, $2)
              RETURNING id, kod, durum, aciklama,
                        NULL::BIGINT AS hissedar_id, NULL::TEXT AS hissedar_adi,
+                       NULL::DATE AS atama_tarih,
                        created_at, updated_at"
         )
         .bind(kod)
@@ -286,10 +292,11 @@ async fn create_toplu(
             "SELECT h.id, h.kod, h.durum, h.aciklama,
                     a.hissedar_id,
                     (SELECT soyad || ' ' || ad FROM hissedarlar WHERE id = a.hissedar_id) AS hissedar_adi,
+                    a.tarih AS atama_tarih,
                     h.created_at, h.updated_at
              FROM hisseler h
              LEFT JOIN LATERAL (
-                 SELECT hissedar_id FROM hisse_atamalari
+                 SELECT hissedar_id, tarih FROM hisse_atamalari
                  WHERE hisse_id = h.id ORDER BY tarih DESC LIMIT 1
              ) a ON true
              WHERE h.id = ANY($1)
