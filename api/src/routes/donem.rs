@@ -356,16 +356,20 @@ async fn donem_borc_olustur(
     .fetch_one(&pool)
     .await?;
 
-    // Tüm aktif hissedarlar için borç oluştur (henüz borcu olmayanlar için)
-    let sonuc = sqlx::query(
-        "INSERT INTO donem_aidat_borclari (donem_id, hissedar_id, hisse_sayisi, tutar)
-         SELECT $1, h.id,
+    let donem_adi = format!("{}/{}", donem.ay, donem.yil);
+    let tarih = chrono::Utc::now().date_naive();
+
+    // Borcu olmayan aktif hissedarları + hisse sayılarını topla
+    #[derive(sqlx::FromRow)]
+    struct Hedef {
+        id: i64,
+        hisse_sayisi: i64,
+    }
+    let hedefler: Vec<Hedef> = sqlx::query_as(
+        "SELECT h.id,
                 COALESCE((SELECT COUNT(*) FROM hisse_atamalari ha
                           JOIN hisseler hs ON hs.id = ha.hisse_id
-                          WHERE ha.hissedar_id = h.id AND hs.durum = 'atanmis'), 1),
-                COALESCE((SELECT COUNT(*) FROM hisse_atamalari ha
-                          JOIN hisseler hs ON hs.id = ha.hisse_id
-                          WHERE ha.hissedar_id = h.id AND hs.durum = 'atanmis'), 1) * $2
+                          WHERE ha.hissedar_id = h.id AND hs.durum = 'atanmis'), 0) AS hisse_sayisi
          FROM hissedarlar h
          WHERE h.aktif = true
            AND NOT EXISTS (
@@ -374,12 +378,51 @@ async fn donem_borc_olustur(
            )"
     )
     .bind(donem_id)
-    .bind(donem.hisse_basi_aidat)
-    .bind(donem_id)
-    .bind(donem.hisse_basi_aidat)
-    .execute(&pool)
+    .fetch_all(&pool)
     .await?;
-    let eklenen = sonuc.rows_affected();
+
+    let mut eklenen: u64 = 0;
+    for h in hedefler {
+        if h.hisse_sayisi <= 0 { continue; }
+        let tutar = (h.hisse_sayisi as f64) * donem.hisse_basi_aidat;
+
+        // Borç kaydı
+        sqlx::query(
+            "INSERT INTO donem_aidat_borclari (donem_id, hissedar_id, hisse_sayisi, tutar)
+             VALUES ($1, $2, $3, $4)"
+        )
+        .bind(donem_id)
+        .bind(h.id)
+        .bind(h.hisse_sayisi)
+        .bind(tutar)
+        .execute(&pool)
+        .await?;
+
+        // Cüzdana borç yansıt
+        let onceki: Option<f64> = sqlx::query_scalar(
+            "SELECT bakiye FROM hissedar_cuzdanlari
+             WHERE hissedar_id = $1 ORDER BY id DESC LIMIT 1"
+        )
+        .bind(h.id)
+        .fetch_optional(&pool)
+        .await?;
+        let yeni = onceki.unwrap_or(0.0) - tutar;
+        let bilgi = format!("{} aidatı - {} hisse", donem_adi, h.hisse_sayisi);
+        sqlx::query(
+            "INSERT INTO hissedar_cuzdanlari (hissedar_id, donem_id, tarih, bilgi, borc, alacak, bakiye)
+             VALUES ($1, $2, $3, $4, $5, 0.0, $6)"
+        )
+        .bind(h.id)
+        .bind(donem_id)
+        .bind(tarih)
+        .bind(&bilgi)
+        .bind(tutar)
+        .bind(yeni)
+        .execute(&pool)
+        .await?;
+
+        eklenen += 1;
+    }
 
     Ok(Json(serde_json::json!({
         "mesaj": format!("{} hissedar için borç oluşturuldu", eklenen),

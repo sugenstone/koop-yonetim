@@ -8,6 +8,44 @@ use serde::{Deserialize, Serialize};
 use crate::auth::AuthUser;
 use crate::errors::AppResult;
 
+// ─── Cüzdan Helper'ları ────────────────────────────────────────────────────────
+
+/// Hissedarın cüzdanındaki son bakiyeyi döner (kayıt yoksa 0.0).
+async fn cuzdan_son_bakiye(pool: &PgPool, hissedar_id: i64) -> anyhow::Result<f64> {
+    let bakiye: Option<f64> = sqlx::query_scalar(
+        "SELECT bakiye FROM hissedar_cuzdanlari
+         WHERE hissedar_id = $1 ORDER BY id DESC LIMIT 1"
+    )
+    .bind(hissedar_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(bakiye.unwrap_or(0.0))
+}
+
+/// Cüzdana borç kaydı ekler ve yeni bakiyeyi döner.
+async fn cuzdan_borc_ekle(
+    pool: &PgPool,
+    hissedar_id: i64,
+    tarih: chrono::NaiveDate,
+    bilgi: &str,
+    tutar: f64,
+) -> anyhow::Result<f64> {
+    let onceki = cuzdan_son_bakiye(pool, hissedar_id).await?;
+    let yeni = onceki - tutar;
+    sqlx::query(
+        "INSERT INTO hissedar_cuzdanlari (hissedar_id, donem_id, tarih, bilgi, borc, alacak, bakiye)
+         VALUES ($1, NULL, $2, $3, $4, 0.0, $5)"
+    )
+    .bind(hissedar_id)
+    .bind(tarih)
+    .bind(bilgi)
+    .bind(tutar)
+    .bind(yeni)
+    .execute(pool)
+    .await?;
+    Ok(yeni)
+}
+
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Hisse {
     pub id: i64,
@@ -229,6 +267,11 @@ async fn create_hisse(
             .bind(hisse.id)
             .execute(&pool)
             .await?;
+        // Cüzdana borç kaydı (ücret > 0 ise)
+        if ucret > 0.0 {
+            let bilgi = format!("Hisse satın alma: {}", hisse.kod);
+            cuzdan_borc_ekle(&pool, hissedar_id, tarih, &bilgi, ucret).await?;
+        }
         // Atama bilgisiyle birlikte tekrar çek
         let hisse = sqlx::query_as::<_, Hisse>(
             "SELECT h.id, h.kod, h.durum, h.aciklama,
@@ -285,7 +328,7 @@ async fn create_toplu(
     if let Some(hissedar_id) = input.atama_hissedar_id {
         let tarih = input.atama_tarih.unwrap_or_else(|| chrono::Utc::now().date_naive());
         let ucret = input.atama_ucret.unwrap_or(0.0);
-        for hid in &olusturulan_idler {
+        for (idx, hid) in olusturulan_idler.iter().enumerate() {
             sqlx::query(
                 "INSERT INTO hisse_atamalari (hisse_id, hissedar_id, tarih, ucret, aciklama)
                  VALUES ($1, $2, $3, $4, $5)"
@@ -297,6 +340,12 @@ async fn create_toplu(
             .bind(&input.atama_aciklama)
             .execute(&pool)
             .await?;
+            // Cüzdana borç kaydı
+            if ucret > 0.0 {
+                let kod = &hisseler[idx].kod;
+                let bilgi = format!("Hisse satın alma: {}", kod);
+                cuzdan_borc_ekle(&pool, hissedar_id, tarih, &bilgi, ucret).await?;
+            }
         }
         sqlx::query("UPDATE hisseler SET durum = 'atanmis', updated_at = NOW() WHERE id = ANY($1)")
             .bind(&olusturulan_idler)
@@ -342,7 +391,7 @@ async fn ata(
     .bind(input.hissedar_id)
     .bind(input.tarih)
     .bind(input.ucret)
-    .bind(input.aciklama)
+    .bind(&input.aciklama)
     .fetch_one(&pool)
     .await?;
 
@@ -350,6 +399,16 @@ async fn ata(
         .bind(input.hisse_id)
         .execute(&pool)
         .await?;
+
+    // Cüzdana borç kaydı (ücret > 0 ise)
+    if input.ucret > 0.0 {
+        let hisse_kod: String = sqlx::query_scalar("SELECT kod FROM hisseler WHERE id = $1")
+            .bind(input.hisse_id)
+            .fetch_one(&pool)
+            .await?;
+        let bilgi = format!("Hisse satın alma: {}", hisse_kod);
+        cuzdan_borc_ekle(&pool, input.hissedar_id, input.tarih, &bilgi, input.ucret).await?;
+    }
 
     Ok(Json(atama))
 }
