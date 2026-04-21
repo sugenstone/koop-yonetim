@@ -84,7 +84,7 @@
 
   const kolonlar: DataTableColumn<Hissedar>[] = [
     { id: 'id', header: '#', accessor: 'id', align: 'left', hiddenByDefault: true },
-    { id: 'ad_soyad', header: 'Ad Soyad', accessor: (h) => `${h.soyad} ${h.ad}` },
+    { id: 'ad_soyad', header: 'Ad Soyad', accessor: (h) => `${h.ad} ${h.soyad}` },
     { id: 'kasa', header: 'Kasa', accessor: (h) => h.kasa_ad ?? '' },
     { id: 'aile_sira_no', header: 'Aile S.', accessor: (h) => h.aile_sira_no ?? '', align: 'center' },
     { id: 'tcno', header: 'TC No', accessor: (h) => h.tcno ?? '' },
@@ -195,7 +195,7 @@
           columns: ['Aile S.', 'Ad Soyad', 'Kasa', 'TC No', 'Telefon', 'Yakın', 'Durum'],
           rows: hissedarlar.map((h) => [
             h.aile_sira_no ?? '',
-            `${h.soyad} ${h.ad}`,
+            `${h.ad} ${h.soyad}`,
             h.kasa_ad ?? '',
             h.tcno ?? '',
             h.tel ?? '',
@@ -262,7 +262,7 @@
                 class="font-semibold text-gray-900 hover:text-primary-600 hover:underline dark:text-white dark:hover:text-primary-400"
                 onclick={() => goto(`/hissedar/${h.id}`)}
               >
-                {h.soyad}, {h.ad}
+                {h.ad} {h.soyad}
               </button>
             </TableBodyCell>
           {/if}
