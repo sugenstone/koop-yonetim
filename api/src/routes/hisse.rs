@@ -74,12 +74,20 @@ pub struct HisseBorc {
 #[derive(Debug, Deserialize)]
 pub struct CreateHisseInput {
     pub aciklama: Option<String>,
+    pub atama_hissedar_id: Option<i64>,
+    pub atama_tarih: Option<chrono::NaiveDate>,
+    pub atama_ucret: Option<f64>,
+    pub atama_aciklama: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct CreateHisseTopluInput {
     pub adet: i32,
     pub aciklama: Option<String>,
+    pub atama_hissedar_id: Option<i64>,
+    pub atama_tarih: Option<chrono::NaiveDate>,
+    pub atama_ucret: Option<f64>,
+    pub atama_aciklama: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -201,6 +209,45 @@ async fn create_hisse(
     .bind(input.aciklama)
     .fetch_one(&pool)
     .await?;
+
+    // Hissedar seçildiyse otomatik atama yap
+    if let Some(hissedar_id) = input.atama_hissedar_id {
+        let tarih = input.atama_tarih.unwrap_or_else(|| chrono::Utc::now().date_naive());
+        let ucret = input.atama_ucret.unwrap_or(0.0);
+        sqlx::query(
+            "INSERT INTO hisse_atamalari (hisse_id, hissedar_id, tarih, ucret, aciklama)
+             VALUES ($1, $2, $3, $4, $5)"
+        )
+        .bind(hisse.id)
+        .bind(hissedar_id)
+        .bind(tarih)
+        .bind(ucret)
+        .bind(&input.atama_aciklama)
+        .execute(&pool)
+        .await?;
+        sqlx::query("UPDATE hisseler SET durum = 'atanmis', updated_at = NOW() WHERE id = $1")
+            .bind(hisse.id)
+            .execute(&pool)
+            .await?;
+        // Atama bilgisiyle birlikte tekrar çek
+        let hisse = sqlx::query_as::<_, Hisse>(
+            "SELECT h.id, h.kod, h.durum, h.aciklama,
+                    a.hissedar_id,
+                    (SELECT soyad || ' ' || ad FROM hissedarlar WHERE id = a.hissedar_id) AS hissedar_adi,
+                    h.created_at, h.updated_at
+             FROM hisseler h
+             LEFT JOIN LATERAL (
+                 SELECT hissedar_id FROM hisse_atamalari
+                 WHERE hisse_id = h.id ORDER BY tarih DESC LIMIT 1
+             ) a ON true
+             WHERE h.id = $1"
+        )
+        .bind(hisse.id)
+        .fetch_one(&pool)
+        .await?;
+        return Ok(Json(hisse));
+    }
+
     Ok(Json(hisse))
 }
 
@@ -216,6 +263,7 @@ async fn create_toplu(
     let baslangic = mevcut.unwrap_or(0);
 
     let mut hisseler = Vec::new();
+    let mut olusturulan_idler: Vec<i64> = Vec::new();
     for i in 0..input.adet {
         let kod = format!("H{:04}", baslangic + (i as i64) + 1);
         let h = sqlx::query_as::<_, Hisse>(
@@ -229,8 +277,51 @@ async fn create_toplu(
         .bind(input.aciklama.clone())
         .fetch_one(&pool)
         .await?;
+        olusturulan_idler.push(h.id);
         hisseler.push(h);
     }
+
+    // Hissedar seçildiyse tüm oluşturulan hisseleri ata
+    if let Some(hissedar_id) = input.atama_hissedar_id {
+        let tarih = input.atama_tarih.unwrap_or_else(|| chrono::Utc::now().date_naive());
+        let ucret = input.atama_ucret.unwrap_or(0.0);
+        for hid in &olusturulan_idler {
+            sqlx::query(
+                "INSERT INTO hisse_atamalari (hisse_id, hissedar_id, tarih, ucret, aciklama)
+                 VALUES ($1, $2, $3, $4, $5)"
+            )
+            .bind(hid)
+            .bind(hissedar_id)
+            .bind(tarih)
+            .bind(ucret)
+            .bind(&input.atama_aciklama)
+            .execute(&pool)
+            .await?;
+        }
+        sqlx::query("UPDATE hisseler SET durum = 'atanmis', updated_at = NOW() WHERE id = ANY($1)")
+            .bind(&olusturulan_idler)
+            .execute(&pool)
+            .await?;
+        // Güncel bilgilerle tekrar çek
+        let guncel = sqlx::query_as::<_, Hisse>(
+            "SELECT h.id, h.kod, h.durum, h.aciklama,
+                    a.hissedar_id,
+                    (SELECT soyad || ' ' || ad FROM hissedarlar WHERE id = a.hissedar_id) AS hissedar_adi,
+                    h.created_at, h.updated_at
+             FROM hisseler h
+             LEFT JOIN LATERAL (
+                 SELECT hissedar_id FROM hisse_atamalari
+                 WHERE hisse_id = h.id ORDER BY tarih DESC LIMIT 1
+             ) a ON true
+             WHERE h.id = ANY($1)
+             ORDER BY h.id"
+        )
+        .bind(&olusturulan_idler)
+        .fetch_all(&pool)
+        .await?;
+        return Ok(Json(guncel));
+    }
+
     Ok(Json(hisseler))
 }
 
