@@ -346,6 +346,10 @@ async fn donem_borc_olustur(
     State(pool): State<PgPool>,
     Path(donem_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
+    use super::common::{
+        cuzdan_alacak_ekle, cuzdan_borc_ekle, cuzdan_son_bakiye, donem_adi as format_donem_adi,
+        kasa_giren_ekle, tahsilat_aciklamasi,
+    };
     user.require_izin(&pool, "donem.yonet").await?;
     // Dönemin aidat miktarını al
     let donem = sqlx::query_as::<_, Donem>(
@@ -356,76 +360,109 @@ async fn donem_borc_olustur(
     .fetch_one(&pool)
     .await?;
 
-    let donem_adi = format!("{}/{}", donem.ay, donem.yil);
+    if donem.hisse_basi_aidat <= 0.0 {
+        return Err(crate::errors::AppError::BadRequest(
+            "Hisse başı aidat tutarı 0 veya negatif, borç oluşturulamaz".into()
+        ));
+    }
+
+    let donem_ad = format_donem_adi(donem.ay, donem.yil);
     let tarih = chrono::Utc::now().date_naive();
 
-    // Borcu olmayan aktif hissedarları + hisse sayılarını topla
+    // Atanmış hisseleri toplayan hissedar bazlı gruplama (Tauri ile aynı mantık)
     #[derive(sqlx::FromRow)]
     struct Hedef {
         id: i64,
+        ad: String,
+        soyad: String,
+        kasa_id: i64,
+        yakin_adi: Option<String>,
+        yakinlik_derecesi: Option<String>,
         hisse_sayisi: i64,
+        hisse_kodlari: Option<String>,
     }
     let hedefler: Vec<Hedef> = sqlx::query_as(
-        "SELECT h.id,
-                COALESCE((SELECT COUNT(*) FROM hisse_atamalari ha
-                          JOIN hisseler hs ON hs.id = ha.hisse_id
-                          WHERE ha.hissedar_id = h.id AND hs.durum = 'atanmis'), 0) AS hisse_sayisi
+        "SELECT h.id, h.ad, h.soyad, h.kasa_id, h.yakin_adi, h.yakinlik_derecesi,
+                COUNT(hs.id) AS hisse_sayisi,
+                STRING_AGG(hs.kod, ', ' ORDER BY hs.kod) AS hisse_kodlari
          FROM hissedarlar h
+         JOIN hisse_atamalari ha ON ha.hissedar_id = h.id
+         JOIN hisseler hs ON hs.id = ha.hisse_id AND hs.durum = 'atanmis'
          WHERE h.aktif = true
+           AND ha.id = (
+               SELECT id FROM hisse_atamalari
+               WHERE hisse_id = hs.id
+               ORDER BY created_at DESC, id DESC LIMIT 1
+           )
            AND NOT EXISTS (
                SELECT 1 FROM donem_aidat_borclari b
                WHERE b.donem_id = $1 AND b.hissedar_id = h.id
-           )"
+           )
+         GROUP BY h.id, h.ad, h.soyad, h.kasa_id, h.yakin_adi, h.yakinlik_derecesi"
     )
     .bind(donem_id)
     .fetch_all(&pool)
     .await?;
 
-    let mut eklenen: u64 = 0;
-    for h in hedefler {
+    let mut olusturulan: u64 = 0;
+    let mut otomatik_tahsil: u64 = 0;
+    let mut tahsil_edilemeyen: u64 = 0;
+
+    for h in &hedefler {
         if h.hisse_sayisi <= 0 { continue; }
-        let tutar = (h.hisse_sayisi as f64) * donem.hisse_basi_aidat;
 
-        // Borç kaydı
+        let toplam = (h.hisse_sayisi as f64) * donem.hisse_basi_aidat;
+        let hisse_kodlari_str = h.hisse_kodlari.as_deref().unwrap_or("");
+        let borc_aciklama = format!(
+            "{} aidatı - {} hisse ({}) ({} {})",
+            donem_ad, h.hisse_sayisi, hisse_kodlari_str, h.ad, h.soyad
+        );
+
+        let onceki_bakiye = cuzdan_son_bakiye(&pool, h.id).await?;
+        let yeterli = onceki_bakiye >= toplam;
+
+        // donem_aidat_borclari INSERT
         sqlx::query(
-            "INSERT INTO donem_aidat_borclari (donem_id, hissedar_id, hisse_sayisi, tutar)
-             VALUES ($1, $2, $3, $4)"
+            "INSERT INTO donem_aidat_borclari
+                 (donem_id, hissedar_id, hisse_sayisi, tutar, odendi, odeme_tarihi, aciklama)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)"
         )
         .bind(donem_id)
         .bind(h.id)
-        .bind(h.hisse_sayisi)
-        .bind(tutar)
+        .bind(h.hisse_sayisi as i32)
+        .bind(toplam)
+        .bind(yeterli)
+        .bind(if yeterli { Some(tarih) } else { None })
+        .bind(&borc_aciklama)
         .execute(&pool)
         .await?;
+        olusturulan += 1;
 
-        // Cüzdana borç yansıt
-        let onceki: Option<f64> = sqlx::query_scalar(
-            "SELECT bakiye FROM hissedar_cuzdanlari
-             WHERE hissedar_id = $1 ORDER BY id DESC LIMIT 1"
-        )
-        .bind(h.id)
-        .fetch_optional(&pool)
-        .await?;
-        let yeni = onceki.unwrap_or(0.0) - tutar;
-        let bilgi = format!("{} aidatı - {} hisse", donem_adi, h.hisse_sayisi);
-        sqlx::query(
-            "INSERT INTO hissedar_cuzdanlari (hissedar_id, donem_id, tarih, bilgi, borc, alacak, bakiye)
-             VALUES ($1, $2, $3, $4, $5, 0.0, $6)"
-        )
-        .bind(h.id)
-        .bind(donem_id)
-        .bind(tarih)
-        .bind(&bilgi)
-        .bind(tutar)
-        .bind(yeni)
-        .execute(&pool)
-        .await?;
+        // Cüzdana borç
+        let cuzdan_borc_bilgi = format!("{} aidatı - {} hisse", donem_ad, h.hisse_sayisi);
+        cuzdan_borc_ekle(&pool, h.id, Some(donem_id), tarih, &cuzdan_borc_bilgi, toplam).await?;
 
-        eklenen += 1;
+        if yeterli {
+            // Kasaya giren
+            let kasa_ac = tahsilat_aciklamasi(
+                &donem_ad, h.hisse_sayisi, &h.ad, &h.soyad, &h.yakin_adi, &h.yakinlik_derecesi
+            );
+            kasa_giren_ekle(&pool, h.kasa_id, tarih, &kasa_ac, toplam).await?;
+
+            // Cüzdana alacak (mahsup)
+            let tahsil_bilgi = format!("Tahsilat: {} - {} hisse", donem_ad, h.hisse_sayisi);
+            cuzdan_alacak_ekle(&pool, h.id, Some(donem_id), tarih, &tahsil_bilgi, toplam).await?;
+            otomatik_tahsil += 1;
+        } else {
+            tahsil_edilemeyen += 1;
+        }
     }
 
     Ok(Json(serde_json::json!({
-        "mesaj": format!("{} hissedar için borç oluşturuldu", eklenen),
-        "eklenen": eklenen
+        "mesaj": format!("{} hissedar için borç oluşturuldu, {} otomatik tahsil edildi",
+            olusturulan, otomatik_tahsil),
+        "olusturulan": olusturulan,
+        "otomatik_tahsil": otomatik_tahsil,
+        "tahsil_edilemeyen": tahsil_edilemeyen
     })))
 }

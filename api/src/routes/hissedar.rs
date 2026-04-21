@@ -107,6 +107,7 @@ pub fn router(pool: PgPool) -> Router {
         .route("/{id}", get(get_hissedar).put(update_hissedar).delete(delete_hissedar))
         .route("/{id}/cuzdan", get(get_cuzdan))
         .route("/{id}/cuzdan/para", post(cuzdan_para_ekle))
+        .route("/{id}/cuzdan/para-geri-cek", post(cuzdan_para_geri_cek))
         .route("/{id}/atamalar", get(get_hissedar_atamalari))
         .route("/{id}/borclar", get(get_hissedar_borclari))
         .with_state(pool)
@@ -252,89 +253,119 @@ async fn cuzdan_para_ekle(
     Path(id): Path<i64>,
     Json(input): Json<ParaEkleInput>,
 ) -> AppResult<Json<ParaEkleSonuc>> {
+    use super::common::{
+        cuzdan_alacak_ekle, cuzdan_son_bakiye, hissedar_bilgi, kasa_giren_ekle,
+    };
     user.require_izin(&pool, "hissedar.cuzdan").await?;
 
-    let mut tx = pool.begin().await?;
+    if input.tutar <= 0.0 {
+        return Err(crate::errors::AppError::BadRequest(
+            "Tutar pozitif olmalı".into()
+        ));
+    }
 
-    // Mevcut bakiyeyi hesapla
-    let mevcut_bakiye: f64 = sqlx::query_scalar(
-        "SELECT COALESCE(bakiye, 0) FROM hissedar_cuzdanlari
-          WHERE hissedar_id = $1 ORDER BY id DESC LIMIT 1"
-    )
-    .bind(id)
-    .fetch_optional(&mut *tx)
-    .await?
-    .unwrap_or(0.0);
+    let h = hissedar_bilgi(&pool, id).await?;
+    let tarih = chrono::Utc::now().date_naive();
 
-    let yeni_bakiye_sonrasi_yatirma = mevcut_bakiye + input.tutar;
-    let bilgi = input.aciklama.as_deref().unwrap_or("Para yatırma");
+    // 1) Cüzdana alacak (para yatırma)
+    let yatirma_ac = input.aciklama.clone().unwrap_or_else(|| "Para yatırma".to_string());
+    cuzdan_alacak_ekle(&pool, id, None, tarih, &yatirma_ac, input.tutar).await?;
 
-    // Yatırma kaydı ekle
-    sqlx::query(
-        "INSERT INTO hissedar_cuzdanlari (hissedar_id, tarih, bilgi, borc, alacak, bakiye)
-          VALUES ($1, CURRENT_DATE, $2, 0, $3, $4)"
-    )
-    .bind(id)
-    .bind(bilgi)
-    .bind(input.tutar)
-    .bind(yeni_bakiye_sonrasi_yatirma)
-    .execute(&mut *tx)
-    .await?;
+    // 2) Kasaya giriş (nakit kasaya geldi)
+    let kasa_ac = format!("Hissedar para yatırma: {} {}", h.ad, h.soyad);
+    kasa_giren_ekle(&pool, h.kasa_id, tarih, &kasa_ac, input.tutar).await?;
 
-    // Ödenmemiş aidat borçlarını sıraya al
+    // 3) Ödenmemiş aidat borçları: bakiye yettiği sürece öde (kasa değil — zaten yattı;
+    //    cüzdanda IOU olarak -tutar var, ödendi=true yapmak yeterli, cüzdan mahsup zaten oluşmuş durumda)
     #[derive(sqlx::FromRow)]
-    struct AidatBorc { id: i64, tutar: f64, donem_id: Option<i64> }
-    let borclar = sqlx::query_as::<_, AidatBorc>(
-        "SELECT id, tutar, donem_id FROM donem_aidat_borclari
-          WHERE hissedar_id = $1 AND odendi = false
-          ORDER BY created_at ASC"
+    struct AidatBorc { id: i64, tutar: f64 }
+    let borclar: Vec<AidatBorc> = sqlx::query_as(
+        "SELECT id, tutar FROM donem_aidat_borclari
+         WHERE hissedar_id = $1 AND odendi = false
+         ORDER BY created_at ASC, id ASC"
     )
     .bind(id)
-    .fetch_all(&mut *tx)
+    .fetch_all(&pool)
     .await?;
 
-    let mut kalan = yeni_bakiye_sonrasi_yatirma;
     let mut tahsil_sayisi: i64 = 0;
     let mut tahsil_toplam: f64 = 0.0;
 
     for borc in &borclar {
-        if kalan < borc.tutar {
-            break;
-        }
-        kalan -= borc.tutar;
+        let mevcut = cuzdan_son_bakiye(&pool, id).await?;
+        if mevcut < borc.tutar { break; }
+
+        sqlx::query(
+            "UPDATE donem_aidat_borclari SET odendi = true, odeme_tarihi = $1 WHERE id = $2"
+        )
+        .bind(tarih)
+        .bind(borc.id)
+        .execute(&pool)
+        .await?;
         tahsil_sayisi += 1;
         tahsil_toplam += borc.tutar;
-
-        // Borç kaydını ödenmiş yap
-        sqlx::query(
-            "UPDATE donem_aidat_borclari SET odendi = true, odeme_tarihi = CURRENT_DATE WHERE id = $1"
-        )
-        .bind(borc.id)
-        .execute(&mut *tx)
-        .await?;
-
-        // Cüzdana borç hareketi ekle
-        let bilgi_borc = format!("Aidat tahsilat — dönem #{}", borc.donem_id.map(|d| d.to_string()).unwrap_or_default());
-        sqlx::query(
-            "INSERT INTO hissedar_cuzdanlari (hissedar_id, donem_id, tarih, bilgi, borc, alacak, bakiye)
-              VALUES ($1, $2, CURRENT_DATE, $3, $4, 0, $5)"
-        )
-        .bind(id)
-        .bind(borc.donem_id)
-        .bind(bilgi_borc)
-        .bind(borc.tutar)
-        .bind(kalan)
-        .execute(&mut *tx)
-        .await?;
     }
 
-    tx.commit().await?;
+    let yeni_bakiye = cuzdan_son_bakiye(&pool, id).await?;
 
     Ok(Json(ParaEkleSonuc {
-        yeni_bakiye: kalan,
+        yeni_bakiye,
         tahsil_edilen_borc_sayisi: tahsil_sayisi,
         tahsil_edilen_toplam: tahsil_toplam,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ParaGeriCekInput {
+    pub tutar: f64,
+    pub aciklama: Option<String>,
+}
+
+async fn cuzdan_para_geri_cek(
+    user: AuthUser,
+    State(pool): State<PgPool>,
+    Path(id): Path<i64>,
+    Json(input): Json<ParaGeriCekInput>,
+) -> AppResult<Json<serde_json::Value>> {
+    use super::common::{
+        cuzdan_borc_ekle, cuzdan_son_bakiye, hissedar_bilgi, kasa_cikan_ekle, kasa_son_bakiye,
+    };
+    user.require_izin(&pool, "hissedar.cuzdan").await?;
+
+    if input.tutar <= 0.0 {
+        return Err(crate::errors::AppError::BadRequest("Tutar pozitif olmalı".into()));
+    }
+
+    let bakiye = cuzdan_son_bakiye(&pool, id).await?;
+    if bakiye < input.tutar {
+        return Err(crate::errors::AppError::BadRequest(format!(
+            "Cüzdan bakiyesi yetersiz (mevcut: {:.2})", bakiye
+        )));
+    }
+
+    let h = hissedar_bilgi(&pool, id).await?;
+    let kasa_bak = kasa_son_bakiye(&pool, h.kasa_id).await?;
+    if kasa_bak < input.tutar {
+        return Err(crate::errors::AppError::BadRequest(format!(
+            "Kasa bakiyesi yetersiz (mevcut: {:.2})", kasa_bak
+        )));
+    }
+
+    let tarih = chrono::Utc::now().date_naive();
+    let bilgi = input.aciklama.clone().unwrap_or_else(|| "Para geri çekme".to_string());
+
+    // Cüzdana borç (alacak azalır)
+    cuzdan_borc_ekle(&pool, id, None, tarih, &bilgi, input.tutar).await?;
+
+    // Kasadan çıkış
+    let kasa_ac = format!("Hissedar para çekme: {} {}", h.ad, h.soyad);
+    kasa_cikan_ekle(&pool, h.kasa_id, tarih, &kasa_ac, input.tutar).await?;
+
+    let yeni_bakiye = cuzdan_son_bakiye(&pool, id).await?;
+    Ok(Json(serde_json::json!({
+        "mesaj": "Para çekildi",
+        "yeni_bakiye": yeni_bakiye
+    })))
 }
 
 async fn get_hissedar_atamalari(
