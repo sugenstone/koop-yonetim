@@ -40,6 +40,10 @@
   let yukleniyor = $state(true);
   let hata = $state('');
 
+  // DataTable export (sıralanış + filtrelenmiş + görünür kolonlar)
+  let pdfRows = $state<Donem[]>([]);
+  let pdfCols = $state<DataTableColumn<Donem>[]>([]);
+
   let modalAcik = $state(false);
   let silModalAcik = $state(false);
   let duzenle = $state<Donem | null>(null);
@@ -71,22 +75,22 @@
   // ─── PDF ────────────────────────────────────────────────────────────────────
 
   function pdfIndir() {
+    const gorCols = pdfCols.filter((c) => c.id !== 'islemler');
     exportPdf({
       title: 'Dönem Listesi',
-      subtitle: `Toplam ${donemler.length} dönem`,
+      subtitle: `${pdfRows.length} dönem`,
       fileName: `donemler-${new Date().toISOString().slice(0, 10)}`,
       sections: [
         {
           kind: 'table',
-          columns: ['Yıl', 'Ay', 'Dönem', 'Aidat', 'Toplantı', 'Durum'],
-          rows: donemler.map((d) => [
-            d.yil,
-            AY_ADLARI[d.ay - 1] ?? d.ay,
-            donemAdi(d.ay, d.yil),
-            formatTL(d.hisse_basi_aidat),
-            d.toplanti_sayisi,
-            d.aktif ? 'Aktif' : 'Pasif'
-          ])
+          columns: gorCols.map((c) => c.header),
+          rows: pdfRows.map((d) =>
+            gorCols.map((c) =>
+              typeof c.accessor === 'function'
+                ? String(c.accessor(d) ?? '')
+                : String((d as Record<string, unknown>)[c.accessor as string] ?? '')
+            )
+          )
         }
       ]
     });
@@ -220,6 +224,8 @@
       searchPlaceholder="Dönem ara..."
       exportFileName="donemler"
       emptyMessage="Henüz dönem eklenmemiş"
+      bind:exportRows={pdfRows}
+      bind:exportVisibleCols={pdfCols}
     >
       {#snippet row(d, _i, visibleCols)}
         <TableBodyRow class="cursor-pointer" onclick={() => goto(`/donem/${d.id}`)}>

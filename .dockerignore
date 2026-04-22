@@ -1,0 +1,13 @@
+node_modules
+.git
+.gitignore
+build
+.svelte-kit
+src-tauri
+target
+test-results
+e2e
+*.md
+.env
+.env.*
+!.env.example

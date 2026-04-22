@@ -18,7 +18,8 @@
     TrashBinSolid,
     UsersSolid,
     ArrowRightOutline,
-    FileLinesSolid
+    FileLinesSolid,
+    CloseOutline
   } from 'flowbite-svelte-icons';
   import { goto } from '$app/navigation';
   import {
@@ -38,6 +39,14 @@
   let kasalar = $state<Kasa[]>([]);
   let yukleniyor = $state(true);
   let hata = $state('');
+
+  // DataTable export (sıralanış + filtrelenmiş + görünür kolonlar)
+  let pdfRows = $state<Hissedar[]>([]);
+  let pdfCols = $state<DataTableColumn<Hissedar>[]>([]);
+
+  // Inline kasa düzenleme
+  let inlineKasaId = $state<number | null>(null);
+  let inlineKasaYukleniyor = $state(false);
 
   // Modal
   let modalAcik = $state(false);
@@ -82,7 +91,7 @@
 
   const kolonlar: DataTableColumn<Hissedar>[] = [
     { id: 'id', header: '#', accessor: 'id', align: 'left', hiddenByDefault: true },
-    { id: 'ad_soyad', header: 'Ad Soyad', accessor: (h) => `${h.soyad} ${h.ad}` },
+    { id: 'ad_soyad', header: 'Ad Soyad', accessor: (h) => `${h.ad} ${h.soyad}` },
     { id: 'kasa', header: 'Kasa', accessor: (h) => h.kasa_ad ?? '' },
     { id: 'aile_sira_no', header: 'Aile S.', accessor: (h) => h.aile_sira_no ?? '', align: 'center' },
     { id: 'tcno', header: 'TC No', accessor: (h) => h.tcno ?? '' },
@@ -171,6 +180,36 @@
     }
   }
 
+  // ─── Inline Kasa Güncelleme ──────────────────────────────────────────────────
+
+  async function kasaInlineGuncelle(h: Hissedar, yeniKasaIdStr: string) {
+    const yeniKasaId = parseInt(yeniKasaIdStr);
+    if (yeniKasaId === h.kasa_id) { inlineKasaId = null; return; }
+    inlineKasaYukleniyor = true;
+    try {
+      await hissedarApi.update({
+        id: h.id,
+        ad: h.ad,
+        soyad: h.soyad,
+        kasa_id: yeniKasaId,
+        aile_sira_no: h.aile_sira_no ?? undefined,
+        tcno: h.tcno ?? undefined,
+        tel: h.tel ?? undefined,
+        yakin_adi: h.yakin_adi ?? undefined,
+        yakinlik_derecesi: h.yakinlik_derecesi ?? undefined
+      });
+      const yeniKasaAd = kasalar.find((k) => k.id === yeniKasaId)?.ad ?? '';
+      hissedarlar = hissedarlar.map((x) =>
+        x.id === h.id ? { ...x, kasa_id: yeniKasaId, kasa_ad: yeniKasaAd } : x
+      );
+    } catch (e: any) {
+      hata = e?.toString() ?? 'Kasa güncelleme hatası';
+    } finally {
+      inlineKasaYukleniyor = false;
+      inlineKasaId = null;
+    }
+  }
+
   // ─── Yardımcılar ────────────────────────────────────────────────────────────
 
   const kasaSecenekleri = $derived(kasalar.map((k) => ({ value: k.id.toString(), name: `${k.ad} (${k.para_birimi})` })));
@@ -178,24 +217,23 @@
   // ─── PDF ────────────────────────────────────────────────────────────────────
 
   function pdfIndir() {
+    const gorCols = pdfCols.filter((c) => c.id !== 'islemler');
     exportPdf({
       title: 'Hissedar Listesi',
-      subtitle: `Toplam ${hissedarlar.length} kayıt`,
+      subtitle: `${pdfRows.length} kayıt (filtre/sıralama uygulanmış)`,
       fileName: `hissedarlar-${new Date().toISOString().slice(0, 10)}`,
       landscape: true,
       sections: [
         {
           kind: 'table',
-          columns: ['Aile S.', 'Ad Soyad', 'Kasa', 'TC No', 'Telefon', 'Yakın', 'Durum'],
-          rows: hissedarlar.map((h) => [
-            h.aile_sira_no ?? '',
-            `${h.soyad} ${h.ad}`,
-            h.kasa_ad ?? '',
-            h.tcno ?? '',
-            h.tel ?? '',
-            h.yakin_adi && h.yakinlik_derecesi ? `${h.yakinlik_derecesi}: ${h.yakin_adi}` : '',
-            h.aktif ? 'Aktif' : 'Pasif'
-          ])
+          columns: gorCols.map((c) => c.header),
+          rows: pdfRows.map((h) =>
+            gorCols.map((c) =>
+              typeof c.accessor === 'function'
+                ? String(c.accessor(h) ?? '')
+                : String((h as Record<string, unknown>)[c.accessor as string] ?? '')
+            )
+          )
         }
       ]
     });
@@ -242,6 +280,8 @@
       searchPlaceholder="Ad, soyad, TC, telefon, yakın ara..."
       exportFileName="hissedarlar"
       emptyMessage="Henüz hissedar eklenmemiş"
+      bind:exportRows={pdfRows}
+      bind:exportVisibleCols={pdfCols}
     >
       {#snippet row(h, _i, visibleCols)}
         <TableBodyRow>
@@ -254,13 +294,47 @@
                 class="font-semibold text-gray-900 hover:text-primary-600 hover:underline dark:text-white dark:hover:text-primary-400"
                 onclick={() => goto(`/hissedar/${h.id}`)}
               >
-                {h.soyad}, {h.ad}
+                {h.ad} {h.soyad}
               </button>
             </TableBodyCell>
           {/if}
           {#if visibleCols.has('kasa')}
-            <TableBodyCell class="text-sm text-gray-600 dark:text-gray-400">
-              {h.kasa_ad ?? '-'}
+            <TableBodyCell class="text-sm">
+              {#if inlineKasaId === h.id}
+                <div class="flex items-center gap-1">
+                  <select
+                    class="rounded border border-primary-400 bg-white px-2 py-1 text-sm text-gray-800 focus:outline-none dark:border-primary-500 dark:bg-gray-700 dark:text-white"
+                    value={h.kasa_id.toString()}
+                    onchange={(e) => kasaInlineGuncelle(h, (e.target as HTMLSelectElement).value)}
+                    disabled={inlineKasaYukleniyor}
+                    autofocus
+                  >
+                    {#each kasalar as k (k.id)}
+                      <option value={k.id.toString()}>{k.ad}</option>
+                    {/each}
+                  </select>
+                  {#if inlineKasaYukleniyor}
+                    <Spinner size="4" />
+                  {:else}
+                    <button
+                      class="rounded p-0.5 text-gray-400 hover:text-red-500"
+                      onclick={() => (inlineKasaId = null)}
+                      title="İptal"
+                    >
+                      <CloseOutline class="h-3.5 w-3.5" />
+                    </button>
+                  {/if}
+                </div>
+              {:else}
+                <button
+                  class="group flex items-center gap-1.5 rounded px-1 py-0.5 text-gray-600 hover:bg-primary-50 hover:text-primary-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-primary-400"
+                  onclick={() => (inlineKasaId = h.id)}
+                  title="Kasayı değiştirmek için tıklayın"
+                >
+                  <span>{h.kasa_ad ?? '-'}</span>
+                  <EditOutline class="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-60" />
+                </button>
+              {/if}
             </TableBodyCell>
           {/if}
           {#if visibleCols.has('aile_sira_no')}

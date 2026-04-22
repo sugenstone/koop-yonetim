@@ -32,6 +32,7 @@
     ChevronLeftOutline,
     ChevronRightOutline
   } from 'flowbite-svelte-icons';
+  import { untrack } from 'svelte';
   import type { Snippet } from 'svelte';
   import {
     toTanstackColumns,
@@ -61,6 +62,10 @@
     striped?: boolean;
     hoverable?: boolean;
     shadow?: boolean;
+    /** Bind ile dışarıya: filtrelenmiş+sıralanmış tüm satırlar (sayfalama öncesi) */
+    exportRows?: T[];
+    /** Bind ile dışarıya: şu an görünür kolonlar */
+    exportVisibleCols?: DataTableColumn<T>[];
   }
 
   let {
@@ -80,7 +85,9 @@
     searchPlaceholder = 'Ara...',
     striped = true,
     hoverable = true,
-    shadow = true
+    shadow = true,
+    exportRows = $bindable<T[]>([]),
+    exportVisibleCols = $bindable<DataTableColumn<T>[]>([])
   }: Props = $props();
 
   // ─── State ──────────────────────────────────────────────────────────────
@@ -178,6 +185,12 @@
     pagination = { pageIndex: 0, pageSize: size };
   }
 
+  // ─── Export state sync ───────────────────────────────────────────────────
+  $effect(() => {
+    exportRows = filteredRows.map((r) => r.original);
+    exportVisibleCols = [...visibleColumns];
+  });
+
   // ─── Export ─────────────────────────────────────────────────────────────
   function exportCsv(): void {
     const visibleIds = new Set(visibleColumns.map((c) => c.id));
@@ -190,10 +203,12 @@
   // ─── Global search reset pagination ──────────────────────────────────────
   $effect(() => {
     // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-    globalFilter;
-    if (pagination.pageIndex !== 0) {
-      pagination = { ...pagination, pageIndex: 0 };
-    }
+    globalFilter; // sadece globalFilter takip edilir
+    untrack(() => {
+      if (pagination.pageIndex !== 0) {
+        pagination = { ...pagination, pageIndex: 0 };
+      }
+    });
   });
 </script>
 

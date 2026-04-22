@@ -43,6 +43,10 @@
   let yukleniyor = $state(true);
   let hata = $state('');
 
+  // DataTable export (sıralanış + filtrelenmiş + görünür kolonlar)
+  let pdfRows = $state<Hisse[]>([]);
+  let pdfCols = $state<DataTableColumn<Hisse>[]>([]);
+
   // Tek hisse modal
   let tekModalAcik = $state(false);
   let tekAciklama = $state('');
@@ -251,22 +255,23 @@
   // ─── PDF ────────────────────────────────────────────────────────────────────
 
   function pdfIndir() {
-    const satildiSayisi = hisseler.filter((h) => h.durum === 'satildi').length;
+    const satildiSayisi = pdfRows.filter((h) => h.durum === 'satildi').length;
+    const gorCols = pdfCols.filter((c) => c.id !== 'islemler');
     exportPdf({
       title: 'Hisse Listesi',
-      subtitle: `Toplam ${hisseler.length} · Müsait ${musaitSayisi} · Atanmış ${atanmisSayisi} · Satıldı ${satildiSayisi}`,
+      subtitle: `${pdfRows.length} kayıt · Müsait ${pdfRows.filter(h=>h.durum==='musait').length} · Atanmış ${pdfRows.filter(h=>h.durum==='atanmis').length} · Satıldı ${satildiSayisi}`,
       fileName: `hisseler-${new Date().toISOString().slice(0, 10)}`,
       sections: [
         {
           kind: 'table',
-          columns: ['Kod', 'Durum', 'Hissedar', 'Açıklama'],
-          widths: ['auto', 'auto', '*', '*'],
-          rows: hisseler.map((h) => [
-            h.kod,
-            h.durum === 'musait' ? 'Müsait' : h.durum === 'atanmis' ? 'Atanmış' : 'Satıldı',
-            h.durum === 'atanmis' && h.hissedar_ad ? `${h.hissedar_ad} ${h.hissedar_soyad ?? ''}`.trim() : '-',
-            h.aciklama ?? ''
-          ])
+          columns: gorCols.map((c) => c.header),
+          rows: pdfRows.map((h) =>
+            gorCols.map((c) =>
+              typeof c.accessor === 'function'
+                ? String(c.accessor(h) ?? '')
+                : String((h as Record<string, unknown>)[c.accessor as string] ?? '')
+            )
+          )
         }
       ]
     });
@@ -319,6 +324,8 @@
       searchPlaceholder="Hisse kodu, hissedar veya açıklama ara..."
       exportFileName="hisseler"
       emptyMessage="Henüz hisse oluşturulmadı"
+      bind:exportRows={pdfRows}
+      bind:exportVisibleCols={pdfCols}
     >
       {#snippet row(hisse, _i, visibleCols)}
         <TableBodyRow

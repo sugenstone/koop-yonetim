@@ -1,35 +1,11 @@
 /**
- * Tauri backend ile iletişim için API helper'ları.
- * Rust komutlarını (invoke) çağırır ve SQLite verilerini döner.
+ * API helper'lari. REST API (Axum) uzerinden iletisim kurar.
+ * Tauri masaustu modunda da ayni REST endpoint'leri kullanir.
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeApi as invoke } from './api-client';
 
 // ─── Tip Tanımları ────────────────────────────────────────────────────────────
-
-export interface User {
-	id: number;
-	name: string;
-	email: string;
-	role: string;
-	status: string;
-	created_at: string;
-	updated_at: string;
-}
-
-export interface CreateUserInput {
-	name: string;
-	email: string;
-	role?: string;
-}
-
-export interface UpdateUserInput {
-	id: number;
-	name?: string;
-	email?: string;
-	role?: string;
-	status?: string;
-}
 
 export interface Product {
 	id: number;
@@ -67,14 +43,88 @@ export interface DashboardStats {
 
 // ─── Kullanıcı API'leri ───────────────────────────────────────────────────────
 
+export type KullaniciRol = 'admin' | 'muhasebe' | 'uye' | 'izleyici';
+
+export const ROL_ETIKETLERI: Record<KullaniciRol, string> = {
+	admin: 'Yönetici',
+	muhasebe: 'Muhasebe',
+	uye: 'Üye',
+	izleyici: 'İzleyici'
+};
+
+export const ROL_ACIKLAMALARI: Record<KullaniciRol, string> = {
+	admin: 'Tüm yetkiler — kullanıcı yönetimi, silme, finansal işlemler',
+	muhasebe: 'Kasa, hissedar, gelir-gider CRUD işlemleri',
+	uye: 'Hissedar ve kendi hisselerini görüntüleme',
+	izleyici: 'Salt okunur erişim'
+};
+
+export interface Kullanici {
+	id: number;
+	ad: string;
+	email: string;
+	rol: KullaniciRol;
+	aktif: boolean;
+	created_at: string;
+}
+
+export interface CreateKullaniciInput {
+	ad: string;
+	email: string;
+	sifre: string;
+	rol: KullaniciRol;
+}
+
+export interface UpdateKullaniciInput {
+	id: number;
+	ad?: string;
+	email?: string;
+	rol?: KullaniciRol;
+	aktif?: boolean;
+}
+
+export interface ChangeSifreInput {
+	eski_sifre?: string;
+	yeni_sifre: string;
+}
+
+export const kullaniciApi = {
+	list: (): Promise<Kullanici[]> => invoke('get_kullanicilar'),
+	create: (input: CreateKullaniciInput): Promise<Kullanici> =>
+		invoke('create_kullanici', { input }),
+	update: (input: UpdateKullaniciInput): Promise<Kullanici> =>
+		invoke('update_kullanici', { input }),
+	delete: (id: number): Promise<{ mesaj: string }> => invoke('delete_kullanici', { id }),
+	changePassword: (id: number, input: ChangeSifreInput): Promise<{ mesaj: string }> =>
+		invoke('change_kullanici_sifre', { id, input })
+};
+
+// ─── Eski demo Kullanıcı API'si (geriye uyumluluk için) ───────────────────────
+
 export const userApi = {
-	getAll: (): Promise<User[]> => invoke('get_users'),
+	getAll: (): Promise<Kullanici[]> => kullaniciApi.list()
+};
 
-	create: (input: CreateUserInput): Promise<User> => invoke('create_user', { input }),
+// ─── İzin / Rol-İzin API'leri ─────────────────────────────────────────────────
 
-	update: (input: UpdateUserInput): Promise<User> => invoke('update_user', { input }),
+export interface Izin {
+	id: number;
+	anahtar: string;       // ör. "kasa.create"
+	kategori: string;      // ör. "kasa"
+	aciklama: string;
+	created_at: string;
+}
 
-	delete: (id: number): Promise<void> => invoke('delete_user', { id })
+export const izinApi = {
+	/** Tüm izinleri listele */
+	list: (): Promise<Izin[]> => invoke('get_izinler'),
+	/** Bir rolün sahip olduğu izin id'leri */
+	getByRol: (rol: KullaniciRol): Promise<number[]> => invoke('get_rol_izinleri', { rol }),
+	/** Bir rolün izinlerini toplu günceller (admin only) */
+	setByRol: (rol: KullaniciRol, izin_ids: number[]): Promise<{ mesaj: string }> =>
+		invoke('set_rol_izinleri', { rol, izin_ids }),
+	/** Giriş yapan kullanıcının izin anahtarları */
+	myPermissions: (): Promise<string[]> => invoke('get_benim_izinlerim')
 };
 
 // ─── Ürün API'leri ────────────────────────────────────────────────────────────
@@ -409,6 +459,9 @@ export interface Hisse {
 	hissedar_id?: number;
 	hissedar_ad?: string;
 	hissedar_soyad?: string;
+	hissedar_yakin_adi?: string;
+	hissedar_yakinlik_derecesi?: string;
+	atama_tarih?: string;
 }
 
 export interface HisseAtama {
@@ -673,4 +726,24 @@ export const gelirGiderApi = {
 	create: (input: CreateKayitInput): Promise<GelirGiderKayit> =>
 		invoke('create_gelir_gider_kaydi', { input }),
 	delete: (id: number): Promise<void> => invoke('delete_gelir_gider_kaydi', { id }),
+};
+// ─── Audit Log API ────────────────────────────────────────────────────────────
+
+export interface AuditLog {
+	id: number;
+	tarih: string;
+	kullanici_id: number | null;
+	kullanici_email: string | null;
+	rol: string | null;
+	yontem: string;
+	yol: string;
+	durum_kodu: number;
+	ip: string | null;
+	user_agent: string | null;
+	sure_ms: number;
+	hata: string | null;
+}
+
+export const logApi = {
+	getAll: (limit = 200): Promise<AuditLog[]> => invoke('get_loglar', { limit }),
 };
