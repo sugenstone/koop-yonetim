@@ -41,6 +41,7 @@
   import DataTable from '$lib/components/DataTable.svelte';
   import type { DataTableColumn } from '$lib/components/dataTableUtils';
   import { exportPdf, formatTL, formatTarih } from '$lib/pdf';
+  import { hasPermission } from '$lib/permissions';
 
   // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,36 @@
   // Para ekleme formu
   let fParaTutar = $state('');
   let fParaAciklama = $state('');
+
+  // Tahsilat iptal
+  let iptalModalAcik = $state(false);
+  let iptalHedefi = $state<CuzdanHareketi | null>(null);
+  let iptalEdiliyor = $state(false);
+  const canIptal = $derived(hasPermission('hissedar.cuzdan.iptal'));
+  function iptalAc(h: CuzdanHareketi) {
+    iptalHedefi = h;
+    iptalModalAcik = true;
+  }
+  async function iptalOnayla() {
+    if (!iptalHedefi || !hissedar) return;
+    iptalEdiliyor = true;
+    try {
+      const sonuc = await cuzdanApi.tahsilatIptal(hissedar.id, iptalHedefi.id);
+      iptalModalAcik = false;
+      iptalHedefi = null;
+      alert(
+        `Tahsilat iptal edildi.\n` +
+        `Silinen cüzdan kaydı: ${sonuc.silinen_cuzdan_kayit}\n` +
+        `Silinen kasa kaydı: ${sonuc.silinen_kasa_kayit}\n` +
+        `Geri açılan borç: ${sonuc.geri_acilan_borc}`
+      );
+      await yukle();
+    } catch (e: any) {
+      hata = e?.toString() ?? 'Tahsilat iptal hatası';
+    } finally {
+      iptalEdiliyor = false;
+    }
+  }
 
   // ─── Yükle ─────────────────────────────────────────────────────────────────
 
@@ -170,7 +201,8 @@
     { id: 'bilgi', header: 'Bilgi', accessor: 'bilgi' },
     { id: 'borc', header: 'Borç', accessor: 'borc', align: 'right' },
     { id: 'alacak', header: 'Alacak', accessor: 'alacak', align: 'right' },
-    { id: 'bakiye', header: 'Bakiye', accessor: 'bakiye', align: 'right', sortable: false, searchable: false }
+    { id: 'bakiye', header: 'Bakiye', accessor: 'bakiye', align: 'right', sortable: false, searchable: false },
+    { id: 'islem', header: 'İşlem', accessor: () => '', align: 'right', sortable: false, searchable: false }
   ];
 
   // ─── Para Ekle ──────────────────────────────────────────────────────────────
@@ -479,6 +511,15 @@
                 {formatTutar(hareket.bakiye)}
               </TableBodyCell>
             {/if}
+            {#if visibleCols.has('islem')}
+              <TableBodyCell class="text-right">
+                {#if canIptal && hareket.alacak > 0 && hareket.borc === 0 && hareket.operation_id}
+                  <Button size="xs" color="red" onclick={() => iptalAc(hareket)}>
+                    İptal
+                  </Button>
+                {/if}
+              </TableBodyCell>
+            {/if}
           </TableBodyRow>
         {/snippet}
       </DataTable>
@@ -642,4 +683,33 @@
       </div>
     {/if}
   {/snippet}
+</Modal>
+
+<!-- Tahsilat İptal Onay Modal -->
+<Modal bind:open={iptalModalAcik} title="Tahsilatı İptal Et" size="md" autoclose={false}>
+  {#if iptalHedefi}
+    <div class="space-y-3 text-sm text-gray-700 dark:text-gray-200">
+      <p class="font-semibold text-red-600 dark:text-red-400">
+        Bu tahsilat tamamen geri alınacak!
+      </p>
+      <div class="rounded-lg bg-gray-50 p-3 dark:bg-gray-700">
+        <div><span class="font-medium">Tarih:</span> {tarihFormat(iptalHedefi.tarih)}</div>
+        <div><span class="font-medium">Bilgi:</span> {iptalHedefi.bilgi}</div>
+        <div><span class="font-medium">Tutar:</span> {formatTutar(iptalHedefi.alacak)} ₺</div>
+      </div>
+      <ul class="list-inside list-disc space-y-1 text-gray-600 dark:text-gray-300">
+        <li>Cüzdandan bu kayıt ve etkilediği borç kapatma kayıtları silinir</li>
+        <li>Kasadan ilgili giriş hareketi silinir ve kasa bakiyesi güncellenir</li>
+        <li>Kapanan dönem aidat borçları yeniden açılır</li>
+      </ul>
+      <p class="font-medium">Devam etmek istediğinize emin misiniz?</p>
+    </div>
+    <div class="flex justify-end gap-2 pt-2">
+      <Button color="red" onclick={iptalOnayla} disabled={iptalEdiliyor}>
+        {#if iptalEdiliyor}<Spinner size="4" class="me-2" />{/if}
+        Evet, İptal Et
+      </Button>
+      <Button color="alternative" onclick={() => (iptalModalAcik = false)} disabled={iptalEdiliyor}>Vazgeç</Button>
+    </div>
+  {/if}
 </Modal>

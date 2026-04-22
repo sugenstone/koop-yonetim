@@ -127,24 +127,6 @@ export const izinApi = {
 	myPermissions: (): Promise<string[]> => invoke('get_benim_izinlerim')
 };
 
-// ─── Ürün API'leri ────────────────────────────────────────────────────────────
-
-export const productApi = {
-	getAll: (): Promise<Product[]> => invoke('get_products'),
-
-	create: (input: CreateProductInput): Promise<Product> => invoke('create_product', { input }),
-
-	update: (input: UpdateProductInput): Promise<Product> => invoke('update_product', { input }),
-
-	delete: (id: number): Promise<void> => invoke('delete_product', { id })
-};
-
-// ─── Dashboard API'leri ───────────────────────────────────────────────────────
-
-export const dashboardApi = {
-	getStats: (): Promise<DashboardStats> => invoke('get_dashboard_stats')
-};
-
 // ─── Tauri ortamında mı çalışıyor? ───────────────────────────────────────────
 
 export const isTauri = (): boolean => {
@@ -603,6 +585,7 @@ export interface AidatBorcu {
 	tutar: number;
 	odendi: boolean;
 	odeme_tarihi?: string;
+	odeme_operation_id?: string | null;
 	aciklama?: string;
 	created_at: string;
 }
@@ -636,6 +619,7 @@ export interface CuzdanHareketi {
 	borc: number;
 	alacak: number;
 	bakiye: number;
+	operation_id?: string | null;
 	created_at: string;
 }
 
@@ -651,6 +635,13 @@ export interface CuzdanParaEkleSonuc {
 	tahsil_edilen_toplam: number;
 }
 
+export interface TahsilatIptalSonuc {
+	mesaj: string;
+	silinen_cuzdan_kayit: number;
+	silinen_kasa_kayit: number;
+	geri_acilan_borc: number;
+}
+
 // ─── Cüzdan API ──────────────────────────────────────────────────────────────
 
 export const cuzdanApi = {
@@ -658,6 +649,8 @@ export const cuzdanApi = {
 		invoke('get_hissedar_cuzdani', { hissedarId }),
 	paraEkle: (input: CuzdanParaEkleInput): Promise<CuzdanParaEkleSonuc> =>
 		invoke('hissedar_cuzdan_para_ekle', { input }),
+	tahsilatIptal: (hissedarId: number, hareketId: number): Promise<TahsilatIptalSonuc> =>
+		invoke('hissedar_tahsilat_iptal', { hissedarId, hareketId }),
 };
 
 // ─── Gelir/Gider Tipleri ─────────────────────────────────────────────────────
@@ -707,6 +700,7 @@ export interface CreateKayitInput {
 	tarih: string;
 	tutar: number;
 	aciklama: string;
+	para_birimi: ParaBirimi;
 }
 
 // ─── Gelir/Gider API'leri ─────────────────────────────────────────────────────

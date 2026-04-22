@@ -303,6 +303,10 @@ const MAPPING: Record<string, EndpointMapping> = {
 		path: (a) => `/api/hissedarlar/${a.input.hissedar_id}/cuzdan/para`,
 		body: (a) => a.input
 	},
+	hissedar_tahsilat_iptal: {
+		method: 'POST',
+		path: (a) => `/api/hissedarlar/${a.hissedarId}/cuzdan/tahsilat-iptal/${a.hareketId}`
+	},
 
 	// ─── Gelir/Gider ──────────────────────────────────────────────────────
 	get_gelir_gider_kategorileri: {
@@ -336,6 +340,11 @@ const MAPPING: Record<string, EndpointMapping> = {
 	delete_gelir_gider_kaydi: {
 		method: 'DELETE',
 		path: (a) => `/api/gelir-gider/kayitlar/${a.id}`
+	},
+	get_loglar: {
+		method: 'GET',
+		path: () => '/api/loglar',
+		query: (a) => ({ limit: a.limit })
 	}
 };
 
@@ -386,7 +395,10 @@ export async function invokeApi<T = any>(cmd: string, args: any = {}): Promise<T
 	}
 
 	const text = await res.text();
-	const data = text ? JSON.parse(text) : null;
+	let data: any = null;
+	if (text) {
+		try { data = JSON.parse(text); } catch { data = { hata: text }; }
+	}
 
 	if (!res.ok) {
 		const msg = (data && (data.hata || data.error || data.message)) || `HTTP ${res.status}`;
