@@ -6,7 +6,6 @@
     Label,
     Input,
     Textarea,
-    Select,
     Spinner,
     TableBodyRow,
     TableBodyCell,
@@ -34,6 +33,7 @@
   } from '$lib/tauri-api';
   import { hissedarLabel, hissedarLabelFromFields } from '$lib/hissedarFormat';
   import DataTable from '$lib/components/DataTable.svelte';
+  import SearchableSelect from '$lib/components/SearchableSelect.svelte';
   import type { DataTableColumn } from '$lib/components/dataTableUtils';
   import { exportPdf } from '$lib/pdf';
 
@@ -430,10 +430,10 @@
     <!-- İsteğe bağlı atama -->
     <div>
       <Label for="tekAtamaHissedar" class="mb-2">Hissedara Ata (isteğe bağlı)</Label>
-      <Select
+      <SearchableSelect
         id="tekAtamaHissedar"
         bind:value={tekAtamaHissedarId}
-        placeholder="— Atamasız oluştur —"
+        placeholder="Atamasız oluştur"
         items={aktifHissedarlar.map((h) => ({ value: h.id, name: hissedarLabel(h) }))}
       />
     </div>
@@ -491,10 +491,10 @@
     <!-- İsteğe bağlı atama -->
     <div>
       <Label for="topluAtamaHissedar" class="mb-2">Hissedara Ata (isteğe bağlı)</Label>
-      <Select
+      <SearchableSelect
         id="topluAtamaHissedar"
         bind:value={topluAtamaHissedarId}
-        placeholder="— Atamasız oluştur —"
+        placeholder="Atamasız oluştur"
         items={aktifHissedarlar.map((h) => ({ value: h.id, name: hissedarLabel(h) }))}
       />
     </div>
@@ -564,14 +564,14 @@
 
     <div>
       <Label for="lstAatamaHissedar" class="mb-2">Hissedar *</Label>
-      <Select
+      <SearchableSelect
         id="lstAatamaHissedar"
         bind:value={atamaHissedarId}
         items={aktifHissedarlar.map((h) => ({
           value: h.id,
           name: hissedarLabel(h)
         }))}
-        placeholder="Hissedar seçin..."
+        placeholder="Hissedar seçin"
       />
     </div>
 
