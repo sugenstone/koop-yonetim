@@ -1,0 +1,26 @@
+[Unit]
+Description=Koop API (Axum REST server)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=koop
+Group=koop
+WorkingDirectory=/opt/koop-api
+EnvironmentFile=/opt/koop-api/.env
+ExecStart=/opt/koop-api/koop-api
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+# Guvenlik
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/koop-api
+
+[Install]
+WantedBy=multi-user.target
